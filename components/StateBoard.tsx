@@ -1,0 +1,306 @@
+"use client";
+
+import { useState } from "react";
+import clsx from "clsx";
+import { Loader2, CheckCircle, AlertCircle, X } from "lucide-react";
+import { TASKS, STATES, PHASES, ProcessConfig, Task, Phase, State } from "@/lib/data";
+import { PhaseColumn } from "./PhaseColumn";
+import type { ProjectInfo } from "@/app/questionnaire/page";
+
+type JiraResult = { taskId: string; jiraKey: string; jiraUrl: string };
+
+type Props = {
+  config: ProcessConfig;
+  projectInfo: ProjectInfo;
+};
+
+type EditingTask = {
+  id: string;
+  title: string;
+  owner: string;
+  phase: Phase;
+  state: State;
+};
+
+export function StateBoard({ config, projectInfo }: Props) {
+  const projectName = projectInfo.projectName;
+  const [tasks, setTasks] = useState<Task[]>(TASKS);
+  const [jiraUrls, setJiraUrls] = useState<Record<string, string>>({});
+  const [creating, setCreating] = useState(false);
+  const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [epicLink, setEpicLink] = useState("");
+  const [editing, setEditing] = useState<EditingTask | null>(null);
+  const [adding, setAdding] = useState<{ phase: Phase; state: State } | null>(null);
+  const [addForm, setAddForm] = useState({ title: "", owner: "" });
+
+  const includedTasks = tasks.filter((t) => config.includedTaskIds.has(t.id));
+
+  function handleDelete(taskId: string) {
+    setTasks((prev) => prev.filter((t) => t.id !== taskId));
+  }
+
+  function handleEditSave() {
+    if (!editing) return;
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === editing.id ? { ...t, title: editing.title, owner: editing.owner } : t
+      )
+    );
+    setEditing(null);
+  }
+
+  function handleAddSave() {
+    if (!adding || !addForm.title.trim()) return;
+    const newTask: Task = {
+      id: `custom-${Date.now()}`,
+      title: addForm.title.trim(),
+      owner: addForm.owner.trim(),
+      phase: adding.phase,
+      state: adding.state,
+      optional: false,
+      jiraTemplate: {
+        summary: addForm.title.trim(),
+        description: `## What\n${addForm.title.trim()}\n\n## Owner\n${addForm.owner.trim()}`,
+        labels: ["design-process", adding.state, adding.phase],
+      },
+    };
+    setTasks((prev) => [...prev, newTask]);
+    config.includedTaskIds.add(newTask.id);
+    setAdding(null);
+    setAddForm({ title: "", owner: "" });
+  }
+
+  async function handleCreateTickets() {
+    setCreating(true);
+    setStatus("idle");
+    try {
+      const res = await fetch("/api/jira/create-tickets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tasks: includedTasks, projectInfo, epicLink: epicLink.trim() }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error ?? "Failed to create tickets");
+      }
+      const data: { results: JiraResult[] } = await res.json();
+      const map: Record<string, string> = {};
+      for (const r of data.results) map[r.taskId] = r.jiraUrl;
+      setJiraUrls(map);
+      setStatus("success");
+    } catch (e: unknown) {
+      setErrorMsg(e instanceof Error ? e.message : "Unknown error");
+      setStatus("error");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      {/* Action bar */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-xl font-semibold text-gray-900">{projectName}</h2>
+          <p className="text-sm text-gray-500">
+            {includedTasks.length} tasks included ·{" "}
+            {config.skippedTaskIds.size} skipped
+            {projectInfo.markets.length > 0 && <> · {projectInfo.markets.join(", ")}</>}
+          </p>
+        </div>
+        <div className="flex items-center gap-3 flex-wrap">
+          <input
+            type="text"
+            value={epicLink}
+            onChange={(e) => setEpicLink(e.target.value)}
+            placeholder="Epic link"
+            disabled={creating || status === "success"}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-400 transition-colors w-64 disabled:opacity-50"
+          />
+          {status === "success" && (
+            <span className="flex items-center gap-1.5 text-sm text-green-700">
+              <CheckCircle className="w-4 h-4" /> Tickets created
+            </span>
+          )}
+          {status === "error" && (
+            <span className="flex items-center gap-1.5 text-sm text-red-600">
+              <AlertCircle className="w-4 h-4" /> {errorMsg}
+            </span>
+          )}
+          <button
+            onClick={handleCreateTickets}
+            disabled={creating || status === "success" || !epicLink.trim()}
+            className="px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-gray-900 text-white hover:bg-gray-700 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
+          >
+            {creating ? (
+              <span className="flex items-center gap-1.5">
+                <Loader2 className="w-4 h-4 animate-spin" /> Creating…
+              </span>
+            ) : status === "success" ? (
+              "Tickets created"
+            ) : (
+              "Create Jira Tickets"
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Board */}
+      <div className="overflow-x-auto pb-4">
+        <div className="flex gap-6 min-w-max">
+          {STATES.map((stateInfo) => {
+            const phasesInState = PHASES.filter(
+              (p) => p.state === stateInfo.id
+            );
+            const allTasksInState = tasks.filter(
+              (t) => t.state === stateInfo.id
+            );
+            if (allTasksInState.length === 0) return null;
+
+            return (
+              <div key={stateInfo.id} className="flex flex-col gap-2">
+                <div
+                  className="rounded-t-xl px-4 py-2 text-xs font-bold uppercase tracking-widest text-gray-600"
+                  style={{ background: stateInfo.color }}
+                >
+                  {stateInfo.label}
+                </div>
+                <div
+                  className="rounded-b-xl rounded-tr-xl p-4 flex gap-4"
+                  style={{ background: stateInfo.color + "80" }}
+                >
+                  {phasesInState.map((phase) => {
+                    const phaseTasks = tasks.filter((t) => t.phase === phase.id);
+                    return (
+                      <PhaseColumn
+                        key={phase.id}
+                        phase={phase.id}
+                        tasks={phaseTasks}
+                        config={config}
+                        jiraUrls={jiraUrls}
+                        onEdit={(task) =>
+                          setEditing({
+                            id: task.id,
+                            title: task.title,
+                            owner: task.owner,
+                            phase: task.phase,
+                            state: task.state,
+                          })
+                        }
+                        onDelete={handleDelete}
+                        onAdd={(ph, st) => {
+                          setAdding({ phase: ph, state: st });
+                          setAddForm({ title: "", owner: "" });
+                        }}
+                        onCreateTickets={phase.id === "measure" ? handleCreateTickets : undefined}
+                        jiraStatus={phase.id === "measure" ? status : undefined}
+                        jiraCreating={phase.id === "measure" ? creating : undefined}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Edit modal */}
+      {editing && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-gray-900">Edit task</h3>
+              <button onClick={() => setEditing(null)} className="text-gray-400 hover:text-gray-700">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-1 block">Title</label>
+                <input
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-400"
+                  value={editing.title}
+                  onChange={(e) => setEditing({ ...editing, title: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-1 block">Owner</label>
+                <input
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-400"
+                  value={editing.owner}
+                  onChange={(e) => setEditing({ ...editing, owner: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                onClick={() => setEditing(null)}
+                className="px-4 py-2 text-sm text-gray-500 hover:text-gray-900"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleEditSave}
+                className="px-4 py-2 text-sm font-medium bg-gray-900 text-white rounded-lg hover:bg-gray-700"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add modal */}
+      {adding && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-gray-900">Add task</h3>
+              <button onClick={() => setAdding(null)} className="text-gray-400 hover:text-gray-700">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-1 block">Title</label>
+                <input
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-400"
+                  placeholder="Task title"
+                  value={addForm.title}
+                  onChange={(e) => setAddForm({ ...addForm, title: e.target.value })}
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-1 block">Owner</label>
+                <input
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-400"
+                  placeholder="e.g. Designer"
+                  value={addForm.owner}
+                  onChange={(e) => setAddForm({ ...addForm, owner: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                onClick={() => setAdding(null)}
+                className="px-4 py-2 text-sm text-gray-500 hover:text-gray-900"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddSave}
+                disabled={!addForm.title.trim()}
+                className="px-4 py-2 text-sm font-medium bg-gray-900 text-white rounded-lg hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
