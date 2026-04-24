@@ -25,6 +25,7 @@ type EditingTask = {
 export function StateBoard({ config, projectInfo }: Props) {
   const projectName = projectInfo.projectName;
   const [tasks, setTasks] = useState<Task[]>(TASKS);
+  const [skippedIds, setSkippedIds] = useState<Set<string>>(new Set(config.skippedTaskIds));
   const [jiraUrls, setJiraUrls] = useState<Record<string, string>>({});
   const [creating, setCreating] = useState(false);
   const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
@@ -34,10 +35,37 @@ export function StateBoard({ config, projectInfo }: Props) {
   const [adding, setAdding] = useState<{ phase: Phase; state: State } | null>(null);
   const [addForm, setAddForm] = useState({ title: "", owner: "" });
 
-  const includedTasks = tasks.filter((t) => config.includedTaskIds.has(t.id));
+  const includedTasks = tasks.filter((t) => !skippedIds.has(t.id));
 
-  function handleDelete(taskId: string) {
-    setTasks((prev) => prev.filter((t) => t.id !== taskId));
+  function handleSkipToggle(taskId: string) {
+    setSkippedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  }
+
+  function handleSkipPhase(phase: Phase) {
+    const phaseTaskIds = tasks.filter((t) => t.phase === phase).map((t) => t.id);
+    const allSkipped = phaseTaskIds.every((id) => skippedIds.has(id));
+    setSkippedIds((prev) => {
+      const next = new Set(prev);
+      if (allSkipped) phaseTaskIds.forEach((id) => next.delete(id));
+      else phaseTaskIds.forEach((id) => next.add(id));
+      return next;
+    });
+  }
+
+  function handleSkipState(stateId: State) {
+    const stateTaskIds = tasks.filter((t) => t.state === stateId).map((t) => t.id);
+    const allSkipped = stateTaskIds.every((id) => skippedIds.has(id));
+    setSkippedIds((prev) => {
+      const next = new Set(prev);
+      if (allSkipped) stateTaskIds.forEach((id) => next.delete(id));
+      else stateTaskIds.forEach((id) => next.add(id));
+      return next;
+    });
   }
 
   function handleEditSave() {
@@ -105,7 +133,7 @@ export function StateBoard({ config, projectInfo }: Props) {
           <h2 className="text-xl font-semibold text-gray-900">{projectName}</h2>
           <p className="text-sm text-gray-500">
             {includedTasks.length} tasks included ·{" "}
-            {config.skippedTaskIds.size} skipped
+            {skippedIds.size} skipped
             {projectInfo.markets.length > 0 && <> · {projectInfo.markets.join(", ")}</>}
           </p>
         </div>
@@ -157,14 +185,23 @@ export function StateBoard({ config, projectInfo }: Props) {
               (t) => t.state === stateInfo.id
             );
             if (allTasksInState.length === 0) return null;
+            const stateAllSkipped = allTasksInState.every((t) => skippedIds.has(t.id));
 
             return (
               <div key={stateInfo.id} className="flex flex-col gap-2">
                 <div
-                  className="rounded-t-xl px-4 py-2 text-xs font-bold uppercase tracking-widest text-gray-600"
+                  className="rounded-t-xl px-4 py-2 flex items-center justify-between"
                   style={{ background: stateInfo.color }}
                 >
-                  {stateInfo.label}
+                  <span className="text-xs font-bold uppercase tracking-widest text-gray-600">
+                    {stateInfo.label}
+                  </span>
+                  <button
+                    onClick={() => handleSkipState(stateInfo.id)}
+                    className="text-[10px] font-medium uppercase tracking-wide text-gray-400 hover:text-gray-700 transition-colors"
+                  >
+                    {stateAllSkipped ? "Unskip all" : "Skip all"}
+                  </button>
                 </div>
                 <div
                   className="rounded-b-xl rounded-tr-xl p-4 flex gap-4"
@@ -177,7 +214,8 @@ export function StateBoard({ config, projectInfo }: Props) {
                         key={phase.id}
                         phase={phase.id}
                         tasks={phaseTasks}
-                        config={config}
+                        skippedIds={skippedIds}
+                        optionalTaskIds={config.optionalTaskIds}
                         jiraUrls={jiraUrls}
                         onEdit={(task) =>
                           setEditing({
@@ -188,7 +226,8 @@ export function StateBoard({ config, projectInfo }: Props) {
                             state: task.state,
                           })
                         }
-                        onDelete={handleDelete}
+                        onSkip={handleSkipToggle}
+                        onSkipPhase={handleSkipPhase}
                         onAdd={(ph, st) => {
                           setAdding({ phase: ph, state: st });
                           setAddForm({ title: "", owner: "" });

@@ -69,80 +69,17 @@ export const QUESTIONS: Question[] = [
 
 export type Answers = Record<string, string>;
 
-export function buildProcessConfig(answers: Answers): ProcessConfig {
-  const problemClarity = answers["problem-clarity"];
-  const existingResearch = answers["existing-research"];
-  const regulatoryDriven = answers["regulatory-driven"];
-
-  let startingState: State;
-
-  if (problemClarity === "no") {
-    startingState = "problem-opportunity";
-  } else if (problemClarity === "decided") {
-    startingState = "implementation";
-  } else {
-    startingState = "solution";
-  }
+export function buildProcessConfig(_answers: Answers = {}): ProcessConfig {
+  const startingState: State = "problem-opportunity";
 
   const included = new Set<string>();
   const skipped = new Set<string>();
   const optional = new Set<string>();
 
   for (const task of TASKS) {
-    const stateOrder: State[] = [
-      "problem-opportunity",
-      "solution",
-      "implementation",
-    ];
-    const startIndex = stateOrder.indexOf(startingState);
-    const taskIndex = stateOrder.indexOf(task.state);
-
-    if (taskIndex < startIndex) {
-      skipped.add(task.id);
-      continue;
-    }
-
-    // Always exclude these two from the default plan
-    if (task.id === "discovery" || task.id === "product-requirement-shareout") {
-      skipped.add(task.id);
-      continue;
-    }
-
-    // Research tasks: skip if existing research available
-    const researchTaskIds = [
-      "user-research",
-      "user-research-analysis",
-      "request-quantitative-data",
-    ];
-    if (
-      researchTaskIds.includes(task.id) &&
-      existingResearch === "yes"
-    ) {
-      skipped.add(task.id);
-      continue;
-    }
-
-    if (
-      researchTaskIds.includes(task.id) &&
-      existingResearch === "partial"
-    ) {
-      optional.add(task.id);
-      included.add(task.id);
-      continue;
-    }
-
-    // Regulatory: skip some ideation tasks
-    if (
-      regulatoryDriven === "yes" &&
-      (task.id === "competitor-analysis" || task.id === "journey-mapping")
-    ) {
-      optional.add(task.id);
-    }
-
     if (task.optional) {
       optional.add(task.id);
     }
-
     included.add(task.id);
   }
 

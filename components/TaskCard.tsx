@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import clsx from "clsx";
-import { ExternalLink, ChevronRight, Pencil, Trash2 } from "lucide-react";
+import { ExternalLink, ChevronRight, Pencil, EyeOff, Eye } from "lucide-react";
 import { Task } from "@/lib/data";
 
 type Props = {
@@ -12,7 +12,7 @@ type Props = {
   optional?: boolean;
   jiraUrl?: string;
   onEdit: () => void;
-  onDelete: () => void;
+  onSkip: () => void;
 };
 
 const STATE_BG: Record<string, string> = {
@@ -27,7 +27,7 @@ const STATE_BORDER: Record<string, string> = {
   implementation: "#b8dbd8",
 };
 
-export function TaskCard({ task, skipped, optional, jiraUrl, onEdit, onDelete }: Props) {
+export function TaskCard({ task, skipped, optional, jiraUrl, onEdit, onSkip }: Props) {
   const [hovered, setHovered] = useState(false);
   const bg = STATE_BG[task.state];
   const border = STATE_BORDER[task.state];
@@ -42,7 +42,7 @@ export function TaskCard({ task, skipped, optional, jiraUrl, onEdit, onDelete }:
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      {/* Edit / Delete actions */}
+      {/* Edit / Skip actions */}
       {hovered && (
         <div className="absolute top-2 right-2 flex items-center gap-1">
           <button
@@ -52,10 +52,10 @@ export function TaskCard({ task, skipped, optional, jiraUrl, onEdit, onDelete }:
             <Pencil className="w-3.5 h-3.5" />
           </button>
           <button
-            onClick={onDelete}
-            className="p-1 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+            onClick={onSkip}
+            className="p-1 rounded-md text-gray-400 hover:text-gray-700 hover:bg-black/5 transition-colors"
           >
-            <Trash2 className="w-3.5 h-3.5" />
+            {skipped ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
           </button>
         </div>
       )}

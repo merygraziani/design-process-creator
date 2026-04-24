@@ -1,22 +1,25 @@
 import { Plus, Loader2, CheckCircle } from "lucide-react";
-import { Task, Phase, State, PHASES, ProcessConfig } from "@/lib/data";
+import { Task, Phase, State, PHASES } from "@/lib/data";
 import { TaskCard } from "./TaskCard";
 
 type Props = {
   phase: Phase;
   tasks: Task[];
-  config: ProcessConfig;
+  skippedIds: Set<string>;
+  optionalTaskIds: Set<string>;
   jiraUrls?: Record<string, string>;
   onEdit: (task: Task) => void;
-  onDelete: (taskId: string) => void;
+  onSkip: (taskId: string) => void;
+  onSkipPhase: (phase: Phase) => void;
   onAdd: (phase: Phase, state: State) => void;
   onCreateTickets?: () => void;
   jiraStatus?: "idle" | "success" | "error";
   jiraCreating?: boolean;
 };
 
-export function PhaseColumn({ phase, tasks, config, jiraUrls, onEdit, onDelete, onAdd, onCreateTickets, jiraStatus, jiraCreating }: Props) {
+export function PhaseColumn({ phase, tasks, skippedIds, optionalTaskIds, jiraUrls, onEdit, onSkip, onSkipPhase, onAdd, onCreateTickets, jiraStatus, jiraCreating }: Props) {
   const phaseInfo = PHASES.find((p) => p.id === phase);
+  const phaseAllSkipped = tasks.length > 0 && tasks.every((t) => skippedIds.has(t.id));
 
   // Group parallel tasks together
   const rendered = new Set<string>();
@@ -41,34 +44,42 @@ export function PhaseColumn({ phase, tasks, config, jiraUrls, onEdit, onDelete, 
         <span className="text-xs font-semibold uppercase tracking-widest text-gray-500">
           {phaseInfo?.label}
         </span>
-        {onCreateTickets && (
+        <div className="flex items-center gap-2">
           <button
-            onClick={onCreateTickets}
-            disabled={jiraCreating || jiraStatus === "success"}
-            className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-900 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            onClick={() => onSkipPhase(phase)}
+            className="text-[10px] font-medium uppercase tracking-wide text-gray-400 hover:text-gray-700 transition-colors"
           >
-            {jiraCreating ? (
-              <Loader2 className="w-3 h-3 animate-spin" />
-            ) : jiraStatus === "success" ? (
-              <CheckCircle className="w-3 h-3 text-green-600" />
-            ) : null}
-            {jiraStatus === "success" ? "Created" : "Create Jira tickets"}
+            {phaseAllSkipped ? "Unskip" : "Skip"}
           </button>
-        )}
+          {onCreateTickets && (
+            <button
+              onClick={onCreateTickets}
+              disabled={jiraCreating || jiraStatus === "success"}
+              className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-900 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {jiraCreating ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : jiraStatus === "success" ? (
+                <CheckCircle className="w-3 h-3 text-green-600" />
+              ) : null}
+              {jiraStatus === "success" ? "Created" : "Create Jira tickets"}
+            </button>
+          )}
+        </div>
       </div>
       <div className="flex flex-col gap-2 pt-2">
-        {groups.map((group, i) =>
+        {groups.filter((g) => g.some((t) => !skippedIds.has(t.id))).map((group, i) =>
           group.length > 1 ? (
             <div key={i} className="flex flex-col gap-2">
-              {group.map((task) => (
+              {group.filter((t) => !skippedIds.has(t.id)).map((task) => (
                 <TaskCard
                   key={task.id}
                   task={task}
-                  skipped={config.skippedTaskIds.has(task.id)}
-                  optional={config.optionalTaskIds.has(task.id)}
+                  skipped={false}
+                  optional={optionalTaskIds.has(task.id)}
                   jiraUrl={jiraUrls?.[task.id]}
                   onEdit={() => onEdit(task)}
-                  onDelete={() => onDelete(task.id)}
+                  onSkip={() => onSkip(task.id)}
                 />
               ))}
             </div>
@@ -76,11 +87,11 @@ export function PhaseColumn({ phase, tasks, config, jiraUrls, onEdit, onDelete, 
             <TaskCard
               key={group[0].id}
               task={group[0]}
-              skipped={config.skippedTaskIds.has(group[0].id)}
-              optional={config.optionalTaskIds.has(group[0].id)}
+              skipped={false}
+              optional={optionalTaskIds.has(group[0].id)}
               jiraUrl={jiraUrls?.[group[0].id]}
               onEdit={() => onEdit(group[0])}
-              onDelete={() => onDelete(group[0].id)}
+              onSkip={() => onSkip(group[0].id)}
             />
           )
         )}

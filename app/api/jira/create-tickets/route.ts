@@ -210,7 +210,7 @@ export async function POST(request: Request) {
           project: { key: PROJECT_KEY },
           summary: task.jiraTemplate.summary,
           description: buildAdfDescription(task.jiraTemplate.description),
-          issuetype: { name: "Task" },
+          issuetype: { name: "Sub-task" },
           labels: task.jiraTemplate.labels,
           ...(storyId ? { parent: { id: storyId } } : {}),
         },

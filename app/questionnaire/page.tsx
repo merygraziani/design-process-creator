@@ -3,11 +3,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight } from "lucide-react";
-import { QUESTIONS, buildProcessConfig, Answers } from "@/lib/questionnaire";
-import { QuestionStep } from "@/components/QuestionStep";
+import { buildProcessConfig } from "@/lib/questionnaire";
 import clsx from "clsx";
 
-const MARKETS = ["DEU", "FRA", "ES", "ITA", "ROE"];
+const MARKETS = ["ALL", "DEU", "FRA", "ES", "ITA", "ROE"];
 
 export type ProjectInfo = {
   projectName: string;
@@ -20,7 +19,6 @@ export type ProjectInfo = {
 
 export default function QuestionnairePage() {
   const router = useRouter();
-  const [phase, setPhase] = useState<"info" | "questions">("info");
   const [projectInfo, setProjectInfo] = useState<ProjectInfo>({
     projectName: "",
     problemStatement: "",
@@ -29,13 +27,7 @@ export default function QuestionnairePage() {
     designers: "",
     pm: "",
   });
-  const [step, setStep] = useState(0);
-  const [answers, setAnswers] = useState<Answers>({});
 
-  const currentQuestion = QUESTIONS[step];
-  const selectedValue = answers[currentQuestion.id];
-  const isLast = step === QUESTIONS.length - 1;
-  const canContinue = !!selectedValue;
   const canProceedFromInfo = projectInfo.projectName.trim().length > 0;
 
   function toggleMarket(market: string) {
@@ -47,40 +39,22 @@ export default function QuestionnairePage() {
     }));
   }
 
-  function handleSelect(value: string) {
-    setAnswers((prev) => ({ ...prev, [currentQuestion.id]: value }));
+  function handleGenerate() {
+    if (!canProceedFromInfo) return;
+    const config = buildProcessConfig({});
+    const params = new URLSearchParams({
+      config: JSON.stringify({
+        startingState: config.startingState,
+        includedTaskIds: [...config.includedTaskIds],
+        skippedTaskIds: [...config.skippedTaskIds],
+        optionalTaskIds: [...config.optionalTaskIds],
+      }),
+      projectInfo: JSON.stringify(projectInfo),
+    });
+    router.push(`/process?${params.toString()}`);
   }
 
-  function handleNext() {
-    if (!canContinue) return;
-    if (isLast) {
-      const config = buildProcessConfig(answers);
-      const params = new URLSearchParams({
-        config: JSON.stringify({
-          startingState: config.startingState,
-          includedTaskIds: [...config.includedTaskIds],
-          skippedTaskIds: [...config.skippedTaskIds],
-          optionalTaskIds: [...config.optionalTaskIds],
-        }),
-        projectInfo: JSON.stringify(projectInfo),
-      });
-      router.push(`/process?${params.toString()}`);
-    } else {
-      setStep((s) => s + 1);
-    }
-  }
-
-  function handleBack() {
-    if (phase === "questions") {
-      if (step > 0) setStep((s) => s - 1);
-      else setPhase("info");
-    } else {
-      router.push("/");
-    }
-  }
-
-  if (phase === "info") {
-    return (
+  return (
       <main className="min-h-screen bg-white flex flex-col items-center justify-center px-6 py-16">
         <div className="w-full max-w-xl flex flex-col gap-5">
           <div>
@@ -204,55 +178,22 @@ export default function QuestionnairePage() {
 
           <div className="flex justify-between mt-2">
             <button
-              onClick={handleBack}
+              onClick={() => router.push("/")}
               className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-900 transition-colors"
             >
               <ArrowLeft className="w-4 h-4" />
               Home
             </button>
             <button
-              onClick={() => setPhase("questions")}
+              onClick={handleGenerate}
               disabled={!canProceedFromInfo}
               className="flex items-center gap-2 bg-gray-900 text-white text-sm font-semibold px-5 py-2.5 rounded-xl hover:bg-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              Next
+              Generate process
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
         </div>
       </main>
     );
-  }
-
-  return (
-    <main className="min-h-screen bg-white flex flex-col items-center justify-center px-6 py-16">
-      <div className="w-full max-w-xl">
-        <QuestionStep
-          question={currentQuestion}
-          stepNumber={step + 1}
-          totalSteps={QUESTIONS.length}
-          selectedValue={selectedValue}
-          onSelect={handleSelect}
-        />
-
-        <div className="flex justify-between mt-8">
-          <button
-            onClick={handleBack}
-            className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-900 transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back
-          </button>
-          <button
-            onClick={handleNext}
-            disabled={!canContinue}
-            className="flex items-center gap-2 bg-gray-900 text-white text-sm font-semibold px-5 py-2.5 rounded-xl hover:bg-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {isLast ? "Generate process" : "Next"}
-            <ArrowRight className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-    </main>
-  );
 }
