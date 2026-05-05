@@ -155,7 +155,7 @@ export default function QuestionnairePage() {
                       designers: e.target.value,
                     }))
                   }
-                  placeholder="e.g. Ana, Cha"
+                  placeholder="e.g. ana@n26.com"
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-gray-400 transition-colors"
                 />
               </div>
@@ -169,7 +169,7 @@ export default function QuestionnairePage() {
                   onChange={(e) =>
                     setProjectInfo((p) => ({ ...p, pm: e.target.value }))
                   }
-                  placeholder="e.g. Jonas"
+                  placeholder="e.g. jonas@n26.com"
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-gray-400 transition-colors"
                 />
               </div>

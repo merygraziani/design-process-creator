@@ -80,6 +80,88 @@ async function lookupIssueId(key: string, auth: string): Promise<string | null> 
   return data.id ?? null;
 }
 
+async function lookupAccountId(email: string, auth: string): Promise<string | null> {
+  const res = await fetch(`${BASE_URL}/user/search?query=${encodeURIComponent(email)}`, {
+    headers: { Authorization: `Basic ${auth}`, Accept: "application/json" },
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  if (!Array.isArray(data) || data.length === 0) return null;
+  const exact = data.find((u: { emailAddress?: string }) => u.emailAddress === email);
+  return (exact ?? data[0]).accountId ?? null;
+}
+
+function buildSubTaskAdfDescription(task: Task): object {
+  const makeId = () => Math.random().toString(36).substring(2, 18);
+
+  // Info panel: Context — What, Owner, Outcome
+  const infoContent: object[] = [
+    {
+      type: "paragraph",
+      content: [{ type: "text", text: "Context", marks: [{ type: "strong" }] }],
+    },
+    ...(task.what
+      ? [{ type: "paragraph", content: [{ type: "text", text: "What: ", marks: [{ type: "strong" }] }, { type: "text", text: task.what }] }]
+      : []),
+    {
+      type: "paragraph",
+      content: [{ type: "text", text: "Owner: ", marks: [{ type: "strong" }] }, { type: "text", text: task.owner }],
+    },
+    ...(task.outcome
+      ? [{ type: "paragraph", content: [{ type: "text", text: "Outcome: ", marks: [{ type: "strong" }] }, { type: "text", text: task.outcome }] }]
+      : []),
+  ];
+
+  // Success panel: Acceptance Criteria + Sub-tasks as taskLists
+  const successContent: object[] = [
+    {
+      type: "paragraph",
+      content: [{ type: "text", text: "Acceptance Criteria", marks: [{ type: "strong" }] }],
+    },
+  ];
+  if (task.acceptanceCriteria && task.acceptanceCriteria.length > 0) {
+    successContent.push({
+      type: "taskList",
+      attrs: { localId: makeId() },
+      content: task.acceptanceCriteria.map((criterion) => ({
+        type: "taskItem",
+        attrs: { localId: makeId(), state: "TODO" },
+        content: [{ type: "text", text: criterion }],
+      })),
+    });
+  }
+  if (task.subTasks && task.subTasks.length > 0) {
+    successContent.push(
+      { type: "paragraph", content: [{ type: "text", text: "Sub-tasks", marks: [{ type: "strong" }] }] },
+      {
+        type: "taskList",
+        attrs: { localId: makeId() },
+        content: task.subTasks.map((st) => ({
+          type: "taskItem",
+          attrs: { localId: makeId(), state: "TODO" },
+          content: [{ type: "text", text: st }],
+        })),
+      }
+    );
+  }
+
+  return {
+    version: 1,
+    type: "doc",
+    content: [
+      { type: "panel", attrs: { panelType: "info" }, content: infoContent },
+      { type: "panel", attrs: { panelType: "success" }, content: successContent },
+      { type: "panel", attrs: { panelType: "note" }, content: [
+        { type: "paragraph", content: [{ type: "text", text: "Designs", marks: [{ type: "strong" }] }] },
+        { type: "paragraph", content: [{ type: "text", text: "Add Figma link" }] },
+      ]},
+      { type: "panel", attrs: { panelType: "warning" }, content: [
+        { type: "paragraph", content: [{ type: "text", text: "Notes", marks: [{ type: "strong" }] }] },
+      ]},
+    ],
+  };
+}
+
 async function createIssue(
   payload: object,
   auth: string
@@ -149,6 +231,31 @@ export async function POST(request: Request) {
     }
   }
 
+  // Resolve assignee (first designer email) and reporter (PM email)
+  let assigneeAccountId: string | null = null;
+  const designerEmail = projectInfo.designers?.split(",")[0]?.trim();
+  if (designerEmail) {
+    assigneeAccountId = await lookupAccountId(designerEmail, auth);
+    if (!assigneeAccountId) {
+      return NextResponse.json(
+        { error: `Could not find a Jira user matching designer "${designerEmail}"` },
+        { status: 400 }
+      );
+    }
+  }
+
+  let reporterAccountId: string | null = null;
+  const pmEmail = projectInfo.pm?.trim();
+  if (pmEmail) {
+    reporterAccountId = await lookupAccountId(pmEmail, auth);
+    if (!reporterAccountId) {
+      return NextResponse.json(
+        { error: `Could not find a Jira user matching PM "${pmEmail}"` },
+        { status: 400 }
+      );
+    }
+  }
+
   // Determine which states have included tasks, preserving order
   const stateOrder: State[] = ["problem-opportunity", "solution", "implementation"];
   const statesPresent = stateOrder.filter((s) => tasks.some((t) => t.state === s));
@@ -178,6 +285,8 @@ export async function POST(request: Request) {
           issuetype: { name: "Story" },
           labels: ["design-process", state],
           ...(epicId ? { parent: { id: epicId } } : {}),
+          ...(assigneeAccountId ? { assignee: { accountId: assigneeAccountId } } : {}),
+          ...(reporterAccountId ? { reporter: { accountId: reporterAccountId } } : {}),
         },
       },
       auth
@@ -209,10 +318,13 @@ export async function POST(request: Request) {
         fields: {
           project: { key: PROJECT_KEY },
           summary: task.jiraTemplate.summary,
-          description: buildAdfDescription(task.jiraTemplate.description),
+          description: buildSubTaskAdfDescription(task),
           issuetype: { name: "Sub-task" },
-          labels: task.jiraTemplate.labels,
+          labels: [...task.jiraTemplate.labels, "CI_UX"],
+          components: [{ name: "design" }],
           ...(storyId ? { parent: { id: storyId } } : {}),
+          ...(assigneeAccountId ? { assignee: { accountId: assigneeAccountId } } : {}),
+          ...(reporterAccountId ? { reporter: { accountId: reporterAccountId } } : {}),
         },
       },
       auth
