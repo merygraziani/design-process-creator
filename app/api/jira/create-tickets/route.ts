@@ -91,6 +91,92 @@ async function lookupAccountId(email: string, auth: string): Promise<string | nu
   return (exact ?? data[0]).accountId ?? null;
 }
 
+function buildStoryAdfDescription(
+  state: State,
+  projectInfo: ProjectInfo,
+  tasksInState: Task[]
+): object {
+  // Info panel: Context — market + targeted users
+  const contextLines: object[] = [
+    {
+      type: "paragraph",
+      content: [{ type: "text", text: "Context", marks: [{ type: "strong" }] }],
+    },
+  ];
+  if (projectInfo.markets?.length) {
+    contextLines.push({
+      type: "paragraph",
+      content: [
+        { type: "text", text: "Market: ", marks: [{ type: "strong" }] },
+        { type: "text", text: projectInfo.markets.join(", ") },
+      ],
+    });
+  }
+  if (projectInfo.targetedUsers) {
+    contextLines.push({
+      type: "paragraph",
+      content: [
+        { type: "text", text: "Targeted users: ", marks: [{ type: "strong" }] },
+        { type: "text", text: projectInfo.targetedUsers },
+      ],
+    });
+  }
+
+  // Success panel: tasks included in this state, with their definition
+  const STATE_DEFINITIONS: Record<State, string> = {
+    "problem-opportunity": "Establish common goals, scope and objectives of the challenge. Deep dive into the problem area to understand the user, context, and constraints. Synthesise the information into a problem definition.",
+    "solution": "Think of alternative solutions that solve the problem that has been defined. Decrease, eliminate and converge the options to pick one solution. Break the solution into small pieces, create a roadmap plan to implement your solution.",
+    "implementation": "Develop and deliver the solution. Track the built solution, and learn from it to iterate further.",
+  };
+
+  const taskListItems = tasksInState.map((t) => ({
+    type: "listItem",
+    content: [
+      {
+        type: "paragraph",
+        content: [
+          { type: "text", text: t.title, marks: [{ type: "strong" }] },
+          ...(t.what ? [{ type: "text", text: ` — ${t.what}` }] : []),
+        ],
+      },
+    ],
+  }));
+
+  return {
+    version: 1,
+    type: "doc",
+    content: [
+      {
+        type: "panel",
+        attrs: { panelType: "info" },
+        content: contextLines,
+      },
+      {
+        type: "panel",
+        attrs: { panelType: "success" },
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: STATE_LABELS[state], marks: [{ type: "strong" }] }],
+          },
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: STATE_DEFINITIONS[state] }],
+          },
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "Tasks included in this phase:", marks: [{ type: "strong" }] }],
+          },
+          {
+            type: "bulletList",
+            content: taskListItems,
+          },
+        ],
+      },
+    ],
+  };
+}
+
 function buildSubTaskAdfDescription(task: Task): object {
   const makeId = () => Math.random().toString(36).substring(2, 18);
 
@@ -266,22 +352,14 @@ export async function POST(request: Request) {
 
   for (const state of statesPresent) {
     const summary = `[${projectName}] ${STATE_LABELS[state]}`;
-    const storyDesc = [
-      `## ${STATE_LABELS[state]}`,
-      `Design process tasks for the ${STATE_LABELS[state]} phase of ${projectName}.`,
-      projectInfo.problemStatement ? `\n## Problem Statement\n${projectInfo.problemStatement}` : "",
-      projectInfo.markets?.length ? `\n## Market\n${projectInfo.markets.join(", ")}` : "",
-      projectInfo.targetedUsers ? `\n## Targeted Users\n${projectInfo.targetedUsers}` : "",
-      projectInfo.designers ? `\n## Designer(s)\n${projectInfo.designers}` : "",
-      projectInfo.pm ? `\n## PM\n${projectInfo.pm}` : "",
-    ].filter(Boolean).join("\n");
+    const tasksInState = tasks.filter((t) => t.state === state);
 
     const result = await createIssue(
       {
         fields: {
           project: { key: PROJECT_KEY },
           summary,
-          description: buildAdfDescription(storyDesc),
+          description: buildStoryAdfDescription(state, projectInfo, tasksInState),
           issuetype: { name: "Story" },
           labels: ["design-process", state],
           ...(epicId ? { parent: { id: epicId } } : {}),
