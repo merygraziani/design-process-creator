@@ -69,21 +69,72 @@ export const QUESTIONS: Question[] = [
 
 export type Answers = Record<string, string>;
 
-export function buildProcessConfig(_answers: Answers = {}): ProcessConfig {
-  const startingState: State = "problem-opportunity";
+export type D2DType = "simple" | "complicated" | "complex";
+
+/**
+ * Resolves the D2D project type from the 3-question answers.
+ * simple      → solution already decided
+ * complicated → problem known, solution unknown
+ * complex     → problem unknown, solution unknown
+ */
+export function resolveD2DType(answers: Answers): D2DType {
+  const problemClarity = answers["problem-clarity"];
+  if (problemClarity === "decided") return "simple";
+  if (problemClarity === "yes") return "complicated";
+  return "complex";
+}
+
+// Tasks always included for Complicated even though they're in Problem & Opportunity
+const COMPLICATED_DISCOVERY_INCLUSIONS = new Set([
+  "product-requirement-shareout",
+  "kickoff-session",
+]);
+
+export function buildProcessConfig(
+  _answers: Answers = {},
+  d2dType: D2DType = "complex"
+): ProcessConfig {
+  let startingState: State;
+  if (d2dType === "simple") startingState = "implementation";
+  else if (d2dType === "complicated") startingState = "solution";
+  else startingState = "problem-opportunity";
 
   const included = new Set<string>();
   const skipped = new Set<string>();
   const optional = new Set<string>();
 
+  const STATE_ORDER: State[] = [
+    "problem-opportunity",
+    "solution",
+    "implementation",
+  ];
+  const startIndex = STATE_ORDER.indexOf(startingState);
+
   for (const task of TASKS) {
-    if (task.optional) {
+    const taskStateIndex = STATE_ORDER.indexOf(task.state);
+    included.add(task.id);
+
+    if (taskStateIndex < startIndex) {
+      // For Complicated: keep a subset of discovery tasks active
+      if (
+        d2dType === "complicated" &&
+        COMPLICATED_DISCOVERY_INCLUSIONS.has(task.id)
+      ) {
+        // not skipped — leave as active
+      } else {
+        skipped.add(task.id);
+      }
+    } else if (task.optional) {
       optional.add(task.id);
     }
-    included.add(task.id);
   }
 
-  return { startingState, includedTaskIds: included, skippedTaskIds: skipped, optionalTaskIds: optional };
+  return {
+    startingState,
+    includedTaskIds: included,
+    skippedTaskIds: skipped,
+    optionalTaskIds: optional,
+  };
 }
 
 export function getIncludedTasks(config: ProcessConfig): Task[] {

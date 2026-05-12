@@ -5,10 +5,38 @@ const CLOUD_ID = "88ee171b-941c-4f1e-a762-25e49b508245";
 const PROJECT_KEY = "UX";
 const BASE_URL = `https://api.atlassian.com/ex/jira/${CLOUD_ID}/rest/api/3`;
 
-const STATE_LABELS: Record<State, string> = {
+// New hierarchy:
+// Initiative (optional, user-provided) → Epic (Discovery / Delivery / Post Launch)
+//   → Story (Problem & Opportunity, Solution, Build, Measure, Iterations)
+//     → Sub-task (individual design tasks)
+
+type EpicGroup = "discovery" | "delivery" | "post-launch";
+
+const EPIC_LABELS: Record<EpicGroup, string> = {
+  "discovery": "Discovery",
+  "delivery": "Delivery",
+  "post-launch": "Post Launch",
+};
+
+// Map each state to the Epic it belongs to
+const STATE_TO_EPIC: Record<State, EpicGroup> = {
+  "problem-opportunity": "discovery",
+  "solution": "discovery",
+  "implementation": "delivery",
+};
+
+// Stories within each state
+const STATE_STORY_LABEL: Record<State, string> = {
   "problem-opportunity": "Problem & Opportunity",
   "solution": "Solution",
-  "implementation": "Implementation",
+  "implementation": "Build",
+};
+
+// Additional stories not mapped 1:1 to a state (created if tasks exist in implementation)
+// Measure and Iterations are sub-phases of implementation — handled via phase
+const PHASE_STORY_LABEL: Record<string, string> = {
+  "build": "Build",
+  "measure": "Measure",
 };
 
 type ProjectInfo = {
@@ -23,47 +51,9 @@ type ProjectInfo = {
 type CreateTicketsBody = {
   tasks: Task[];
   projectInfo: ProjectInfo;
-  epicLink?: string;
+  initiativeLink?: string;
 };
 
-function buildAdfDescription(markdown: string): object {
-  const lines = markdown.split("\n");
-  const content: object[] = [];
-
-  for (const line of lines) {
-    if (line.startsWith("## ")) {
-      content.push({
-        type: "heading",
-        attrs: { level: 3 },
-        content: [{ type: "text", text: line.replace("## ", "") }],
-      });
-    } else if (line.startsWith("- ")) {
-      content.push({
-        type: "bulletList",
-        content: [
-          {
-            type: "listItem",
-            content: [
-              {
-                type: "paragraph",
-                content: [{ type: "text", text: line.replace("- ", "") }],
-              },
-            ],
-          },
-        ],
-      });
-    } else if (line.trim()) {
-      content.push({
-        type: "paragraph",
-        content: [{ type: "text", text: line }],
-      });
-    }
-  }
-
-  return { version: 1, type: "doc", content };
-}
-
-// Extract issue key from a Jira URL or return as-is if it already looks like a key (e.g. UX-123)
 function parseIssueKey(input: string): string | null {
   const trimmed = input.trim();
   if (/^[A-Z]+-\d+$/.test(trimmed)) return trimmed;
@@ -91,56 +81,114 @@ async function lookupAccountId(email: string, auth: string): Promise<string | nu
   return (exact ?? data[0]).accountId ?? null;
 }
 
-function buildStoryAdfDescription(
-  state: State,
-  projectInfo: ProjectInfo,
-  tasksInState: Task[]
-): object {
-  // Info panel: Context — market + targeted users
-  const contextLines: object[] = [
+async function createIssue(
+  payload: object,
+  auth: string
+): Promise<{ key: string; id: string } | { error: string }> {
+  const res = await fetch(`${BASE_URL}/issue`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${auth}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    return { error: err.errorMessages?.[0] ?? `HTTP ${res.status}` };
+  }
+
+  const data = await res.json();
+  return { key: data.key, id: data.id };
+}
+
+function makeId() {
+  return Math.random().toString(36).substring(2, 18);
+}
+
+function buildEpicAdfDescription(epicLabel: string, projectInfo: ProjectInfo): object {
+  const content: object[] = [
     {
-      type: "paragraph",
-      content: [{ type: "text", text: "Context", marks: [{ type: "strong" }] }],
+      type: "panel",
+      attrs: { panelType: "info" },
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: epicLabel, marks: [{ type: "strong" }] }] },
+        ...(projectInfo.markets?.length ? [{
+          type: "paragraph",
+          content: [
+            { type: "text", text: "Market: ", marks: [{ type: "strong" }] },
+            { type: "text", text: projectInfo.markets.join(", ") },
+          ],
+        }] : []),
+        ...(projectInfo.targetedUsers ? [{
+          type: "paragraph",
+          content: [
+            { type: "text", text: "Targeted users: ", marks: [{ type: "strong" }] },
+            { type: "text", text: projectInfo.targetedUsers },
+          ],
+        }] : []),
+      ],
     },
   ];
-  if (projectInfo.markets?.length) {
-    contextLines.push({
-      type: "paragraph",
-      content: [
-        { type: "text", text: "Market: ", marks: [{ type: "strong" }] },
-        { type: "text", text: projectInfo.markets.join(", ") },
-      ],
-    });
-  }
-  if (projectInfo.targetedUsers) {
-    contextLines.push({
-      type: "paragraph",
-      content: [
-        { type: "text", text: "Targeted users: ", marks: [{ type: "strong" }] },
-        { type: "text", text: projectInfo.targetedUsers },
-      ],
-    });
-  }
+  return { version: 1, type: "doc", content };
+}
 
-  // Success panel: tasks included in this state, with their definition
-  const STATE_DEFINITIONS: Record<State, string> = {
-    "problem-opportunity": "Establish common goals, scope and objectives of the challenge. Deep dive into the problem area to understand the user, context, and constraints. Synthesise the information into a problem definition.",
-    "solution": "Think of alternative solutions that solve the problem that has been defined. Decrease, eliminate and converge the options to pick one solution. Break the solution into small pieces, create a roadmap plan to implement your solution.",
-    "implementation": "Develop and deliver the solution. Track the built solution, and learn from it to iterate further.",
+// Rich "What we do" content per story type, based on the N26 process framework image
+const STORY_WHAT_WE_DO: Record<string, string[]> = {
+  "Problem & Opportunity": [
+    "Kick start: We create the team, its rules & rituals (if applicable). We understand the project brief and challenges. We get to know our stakeholders and their concern. We define OKRs and Objectives. We define the type of the project (simple, complex, complicated) to understand where we need to start the process.",
+    "Understand: We define clear research goals that can be achieved within our timelines. We review past research findings (if applicable). We review CS data (if applicable). We review data analytics (if applicable). We decide which method we will use for research depending on the necessity of the problem/opportunity. We plan, coordinate and conduct the study(s). We look at both qualitative and quantitative data to make the unknown known.",
+    "Define: We synthesise information into research findings that enable decisions. We prepare the research reports and share them with our stakeholders. We define the problem based on the research output. We create our HMW statements. We investigate the problem to conclude if it is Viable (Business Needs), Desirable (User Needs), Feasible (Tech Ability), and Compliant (Legal Needs).",
+  ],
+  "Solution": [
+    "Ideate: We reframe the challenge by revisiting the problem. We brainstorm a range of creative ideas that address the problem that we defined. We diverge solutions without judging the ideas. We mix and remix the ideas.",
+    "Validate: We iteratively converge the alternative solutions. We evaluate the alternatives against parameters, matrices, etc. We identify the main validation points. Prototype, test and analyse. We refine the solution to ensure that it is: Viable (Business Needs), Desirable (User Needs), Feasible (Tech Ability), Compliant (Legal Needs).",
+    "Refine: We align with stakeholders and have technical solution discovery. We decompose the solutions into epics, stories and tasks (each epic or story can have its own small process). We map out use cases and validations. We consider NXD compliance and localisation.",
+  ],
+  "Build": [
+    "We build the solution in sprints.",
+    "We have QA tests (development and design).",
+    "We build test automation.",
+    "We have usability research in the company and with friends and family.",
+    "We define tracking.",
+    "We have A/B testing plans.",
+    "We have a release plan.",
+  ],
+  "Measure": [
+    "We track the data to see how the solution performs.",
+    "We analyse the A/B test results.",
+  ],
+  "Iterations": [
+    "We have usability researches & journey mapping to understand users' pain and gain points.",
+    "We overview CS data report understanding users' pain points in the field.",
+  ],
+};
+
+function adfBulletList(items: string[]): object {
+  return {
+    type: "bulletList",
+    content: items.map((item) => ({
+      type: "listItem",
+      content: [{ type: "paragraph", content: [{ type: "text", text: item }] }],
+    })),
   };
+}
 
-  const taskListItems = tasksInState.map((t) => ({
+function buildStoryAdfDescription(storyLabel: string, projectInfo: ProjectInfo, tasks: Task[]): object {
+  const taskListItems = tasks.map((t) => ({
     type: "listItem",
-    content: [
-      {
-        type: "paragraph",
-        content: [
-          { type: "text", text: t.title, marks: [{ type: "strong" }] },
-          ...(t.what ? [{ type: "text", text: ` — ${t.what}` }] : []),
-        ],
-      },
-    ],
+    content: [{
+      type: "paragraph",
+      content: [
+        { type: "text", text: t.title, marks: [{ type: "strong" }] },
+        ...(t.what ? [{ type: "text", text: ` — ${t.what}` }] : []),
+      ],
+    }],
   }));
+
+  const whatWeDo = STORY_WHAT_WE_DO[storyLabel] ?? [];
 
   return {
     version: 1,
@@ -149,28 +197,38 @@ function buildStoryAdfDescription(
       {
         type: "panel",
         attrs: { panelType: "info" },
-        content: contextLines,
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: storyLabel, marks: [{ type: "strong" }] }] },
+          ...(projectInfo.markets?.length ? [{
+            type: "paragraph",
+            content: [
+              { type: "text", text: "Market: ", marks: [{ type: "strong" }] },
+              { type: "text", text: projectInfo.markets.join(", ") },
+            ],
+          }] : []),
+          ...(projectInfo.targetedUsers ? [{
+            type: "paragraph",
+            content: [
+              { type: "text", text: "Targeted users: ", marks: [{ type: "strong" }] },
+              { type: "text", text: projectInfo.targetedUsers },
+            ],
+          }] : []),
+        ],
       },
+      ...(whatWeDo.length > 0 ? [{
+        type: "panel",
+        attrs: { panelType: "note" },
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: "What we do", marks: [{ type: "strong" }] }] },
+          adfBulletList(whatWeDo),
+        ],
+      }] : []),
       {
         type: "panel",
         attrs: { panelType: "success" },
         content: [
-          {
-            type: "paragraph",
-            content: [{ type: "text", text: STATE_LABELS[state], marks: [{ type: "strong" }] }],
-          },
-          {
-            type: "paragraph",
-            content: [{ type: "text", text: STATE_DEFINITIONS[state] }],
-          },
-          {
-            type: "paragraph",
-            content: [{ type: "text", text: "Tasks included in this phase:", marks: [{ type: "strong" }] }],
-          },
-          {
-            type: "bulletList",
-            content: taskListItems,
-          },
+          { type: "paragraph", content: [{ type: "text", text: "Tasks in this story:", marks: [{ type: "strong" }] }] },
+          { type: "bulletList", content: taskListItems },
         ],
       },
     ],
@@ -178,45 +236,36 @@ function buildStoryAdfDescription(
 }
 
 function buildSubTaskAdfDescription(task: Task): object {
-  const makeId = () => Math.random().toString(36).substring(2, 18);
-
-  // Info panel: Context — What, Owner, Outcome
   const infoContent: object[] = [
-    {
+    ...(task.what ? [{
       type: "paragraph",
-      content: [{ type: "text", text: "Context", marks: [{ type: "strong" }] }],
-    },
-    ...(task.what
-      ? [{ type: "paragraph", content: [{ type: "text", text: "What: ", marks: [{ type: "strong" }] }, { type: "text", text: task.what }] }]
-      : []),
+      content: [{ type: "text", text: "What: ", marks: [{ type: "strong" }] }, { type: "text", text: task.what }],
+    }] : []),
     {
       type: "paragraph",
       content: [{ type: "text", text: "Owner: ", marks: [{ type: "strong" }] }, { type: "text", text: task.owner }],
     },
-    ...(task.outcome
-      ? [{ type: "paragraph", content: [{ type: "text", text: "Outcome: ", marks: [{ type: "strong" }] }, { type: "text", text: task.outcome }] }]
-      : []),
+    ...(task.outcome ? [{
+      type: "paragraph",
+      content: [{ type: "text", text: "Outcome: ", marks: [{ type: "strong" }] }, { type: "text", text: task.outcome }],
+    }] : []),
   ];
 
-  // Success panel: Acceptance Criteria + Sub-tasks as taskLists
   const successContent: object[] = [
-    {
-      type: "paragraph",
-      content: [{ type: "text", text: "Acceptance Criteria", marks: [{ type: "strong" }] }],
-    },
+    { type: "paragraph", content: [{ type: "text", text: "Acceptance Criteria", marks: [{ type: "strong" }] }] },
   ];
-  if (task.acceptanceCriteria && task.acceptanceCriteria.length > 0) {
+  if (task.acceptanceCriteria?.length) {
     successContent.push({
       type: "taskList",
       attrs: { localId: makeId() },
-      content: task.acceptanceCriteria.map((criterion) => ({
+      content: task.acceptanceCriteria.map((c) => ({
         type: "taskItem",
         attrs: { localId: makeId(), state: "TODO" },
-        content: [{ type: "text", text: criterion }],
+        content: [{ type: "text", text: c }],
       })),
     });
   }
-  if (task.subTasks && task.subTasks.length > 0) {
+  if (task.subTasks?.length) {
     successContent.push(
       { type: "paragraph", content: [{ type: "text", text: "Sub-tasks", marks: [{ type: "strong" }] }] },
       {
@@ -242,33 +291,30 @@ function buildSubTaskAdfDescription(task: Task): object {
         { type: "paragraph", content: [{ type: "text", text: "Add Figma link" }] },
       ]},
       { type: "panel", attrs: { panelType: "warning" }, content: [
-        { type: "paragraph", content: [{ type: "text", text: "Notes", marks: [{ type: "strong" }] }] },
+        { type: "paragraph", content: [{ type: "text", text: "Tools", marks: [{ type: "strong" }] }] },
+        { type: "paragraph", content: [{ type: "text", text: "Eg. For this task you can use the following tools:" }] },
+        {
+          type: "bulletList",
+          content: [
+            {
+              type: "listItem",
+              content: [{ type: "paragraph", content: [
+                { type: "text", text: "Mobbin (" },
+                { type: "text", text: "https://mobbin.com/discover/apps/ios/latest", marks: [{ type: "link", attrs: { href: "https://mobbin.com/discover/apps/ios/latest" } }] },
+                { type: "text", text: "): Ask @Ilgavrs for a N26 Team seat to have full access" },
+              ]}],
+            },
+            {
+              type: "listItem",
+              content: [{ type: "paragraph", content: [
+                { type: "text", text: "Benchmark skill" },
+              ]}],
+            },
+          ],
+        },
       ]},
     ],
   };
-}
-
-async function createIssue(
-  payload: object,
-  auth: string
-): Promise<{ key: string; id: string } | { error: string }> {
-  const res = await fetch(`${BASE_URL}/issue`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${auth}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    return { error: err.errorMessages?.[0] ?? `HTTP ${res.status}` };
-  }
-
-  const data = await res.json();
-  return { key: data.key, id: data.id };
 }
 
 export async function POST(request: Request) {
@@ -289,7 +335,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { tasks, projectInfo, epicLink } = body;
+  const { tasks, projectInfo, initiativeLink } = body;
   const projectName = projectInfo?.projectName ?? "Design Project";
 
   if (!Array.isArray(tasks) || tasks.length === 0) {
@@ -298,35 +344,26 @@ export async function POST(request: Request) {
 
   const auth = Buffer.from(`${email}:${apiToken}`).toString("base64");
 
-  // Resolve epic numeric ID from the pasted link/key
-  let epicId: string | null = null;
-  if (epicLink) {
-    const epicKey = parseIssueKey(epicLink);
-    if (!epicKey) {
-      return NextResponse.json(
-        { error: "Could not parse an issue key from the epic link" },
-        { status: 400 }
-      );
+  // Resolve initiative ID (optional)
+  let initiativeId: string | null = null;
+  if (initiativeLink?.trim()) {
+    const initiativeKey = parseIssueKey(initiativeLink.trim());
+    if (!initiativeKey) {
+      return NextResponse.json({ error: "Could not parse an issue key from the initiative link" }, { status: 400 });
     }
-    epicId = await lookupIssueId(epicKey, auth);
-    if (!epicId) {
-      return NextResponse.json(
-        { error: `Could not find epic ${epicKey} in Jira` },
-        { status: 400 }
-      );
+    initiativeId = await lookupIssueId(initiativeKey, auth);
+    if (!initiativeId) {
+      return NextResponse.json({ error: `Could not find initiative ${initiativeKey} in Jira` }, { status: 400 });
     }
   }
 
-  // Resolve assignee (first designer email) and reporter (PM email)
+  // Resolve people
   let assigneeAccountId: string | null = null;
   const designerEmail = projectInfo.designers?.split(",")[0]?.trim();
   if (designerEmail) {
     assigneeAccountId = await lookupAccountId(designerEmail, auth);
     if (!assigneeAccountId) {
-      return NextResponse.json(
-        { error: `Could not find a Jira user matching designer "${designerEmail}"` },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: `Could not find a Jira user matching designer "${designerEmail}"` }, { status: 400 });
     }
   }
 
@@ -335,78 +372,165 @@ export async function POST(request: Request) {
   if (pmEmail) {
     reporterAccountId = await lookupAccountId(pmEmail, auth);
     if (!reporterAccountId) {
-      return NextResponse.json(
-        { error: `Could not find a Jira user matching PM "${pmEmail}"` },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: `Could not find a Jira user matching PM "${pmEmail}"` }, { status: 400 });
     }
   }
 
-  // Determine which states have included tasks, preserving order
-  const stateOrder: State[] = ["problem-opportunity", "solution", "implementation"];
-  const statesPresent = stateOrder.filter((s) => tasks.some((t) => t.state === s));
+  const peopleFields = {
+    ...(assigneeAccountId ? { assignee: { accountId: assigneeAccountId } } : {}),
+    ...(reporterAccountId ? { reporter: { accountId: reporterAccountId } } : {}),
+  };
 
-  // Create one Story per state, as a child of the epic
-  const storyIdByState: Record<string, string> = {};
-  const storyResults: { state: State; jiraKey: string; jiraUrl: string }[] = [];
+  // Determine which epics are needed based on tasks present
+  const epicGroupsNeeded = Array.from(
+    new Set(tasks.map((t) => STATE_TO_EPIC[t.state]))
+  ) as EpicGroup[];
 
-  for (const state of statesPresent) {
-    const summary = `[${projectName}] ${STATE_LABELS[state]}`;
-    const tasksInState = tasks.filter((t) => t.state === state);
+  // Create Epics (children of Initiative if provided)
+  const epicIdByGroup: Record<string, string> = {};
 
-    const result = await createIssue(
-      {
-        fields: {
-          project: { key: PROJECT_KEY },
-          summary,
-          description: buildStoryAdfDescription(state, projectInfo, tasksInState),
-          issuetype: { name: "Story" },
-          labels: ["design-process", state],
-          ...(epicId ? { parent: { id: epicId } } : {}),
-          ...(assigneeAccountId ? { assignee: { accountId: assigneeAccountId } } : {}),
-          ...(reporterAccountId ? { reporter: { accountId: reporterAccountId } } : {}),
-        },
+  for (const epicGroup of epicGroupsNeeded) {
+    const epicLabel = EPIC_LABELS[epicGroup];
+    const result = await createIssue({
+      fields: {
+        project: { key: PROJECT_KEY },
+        summary: `[${projectName}] ${epicLabel}`,
+        description: buildEpicAdfDescription(epicLabel, projectInfo),
+        issuetype: { name: "Epic" },
+        labels: ["design-process", epicGroup],
+        ...(initiativeId ? { parent: { id: initiativeId } } : {}),
+        ...peopleFields,
       },
-      auth
-    );
+    }, auth);
 
     if ("error" in result) {
-      return NextResponse.json(
-        { error: `Failed to create story for ${STATE_LABELS[state]}: ${result.error}` },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: `Failed to create epic "${epicLabel}": ${result.error}` }, { status: 500 });
     }
-
-    storyIdByState[state] = result.id;
-    storyResults.push({
-      state,
-      jiraKey: result.key,
-      jiraUrl: `https://number26-jira.atlassian.net/browse/${result.key}`,
-    });
+    epicIdByGroup[epicGroup] = result.id;
   }
 
-  // Create each task as a child Task under its state's Story
+  // Create Stories — one per phase group within each epic
+  // Implementation state splits into Build + Measure stories by phase
+  // problem-opportunity and solution each get their own story
+  // Story key:
+  // - problem-opportunity and solution → one story per state (all phases merged)
+  // - implementation → one story per phase (build vs measure)
+  const storyKey = (state: State, phase: string) =>
+    state === "implementation" ? `${state}::${phase}` : state;
+
+  const storyIdByKey: Record<string, string> = {};
+
+  // Collect unique story slots
+  const storySlots: { state: State; phase: string; label: string; epicGroup: EpicGroup }[] = [];
+  const seen = new Set<string>();
+
+  for (const task of tasks) {
+    let label: string;
+    let epicGroup: EpicGroup;
+    let slotPhase: string;
+
+    if (task.state === "implementation") {
+      label = PHASE_STORY_LABEL[task.phase] ?? "Build";
+      epicGroup = task.phase === "measure" ? "post-launch" : "delivery";
+      slotPhase = task.phase;
+    } else {
+      label = STATE_STORY_LABEL[task.state];
+      epicGroup = STATE_TO_EPIC[task.state];
+      slotPhase = "all";
+    }
+
+    const key = storyKey(task.state, task.phase);
+    if (!seen.has(key)) {
+      seen.add(key);
+      storySlots.push({ state: task.state, phase: slotPhase, label, epicGroup });
+    }
+  }
+
+  // Ensure Delivery and Post Launch epics are created if needed
+  for (const slot of storySlots) {
+    if (!epicIdByGroup[slot.epicGroup]) {
+      const epicLabel = EPIC_LABELS[slot.epicGroup];
+      const result = await createIssue({
+        fields: {
+          project: { key: PROJECT_KEY },
+          summary: `[${projectName}] ${epicLabel}`,
+          description: buildEpicAdfDescription(epicLabel, projectInfo),
+          issuetype: { name: "Epic" },
+          labels: ["design-process", slot.epicGroup],
+          ...(initiativeId ? { parent: { id: initiativeId } } : {}),
+          ...peopleFields,
+        },
+      }, auth);
+
+      if ("error" in result) {
+        return NextResponse.json({ error: `Failed to create epic "${epicLabel}": ${result.error}` }, { status: 500 });
+      }
+      epicIdByGroup[slot.epicGroup] = result.id;
+    }
+  }
+
+  for (const slot of storySlots) {
+    const tasksInSlot = tasks.filter((t) =>
+      slot.state === "implementation"
+        ? t.state === slot.state && t.phase === slot.phase
+        : t.state === slot.state
+    );
+
+    const epicId = epicIdByGroup[slot.epicGroup];
+    const result = await createIssue({
+      fields: {
+        project: { key: PROJECT_KEY },
+        summary: `[${projectName}] ${slot.label}`,
+        description: buildStoryAdfDescription(slot.label, projectInfo, tasksInSlot),
+        issuetype: { name: "Story" },
+        labels: ["design-process", slot.state],
+        ...(epicId ? { parent: { id: epicId } } : {}),
+        ...peopleFields,
+      },
+    }, auth);
+
+    if ("error" in result) {
+      return NextResponse.json({ error: `Failed to create story "${slot.label}": ${result.error}` }, { status: 500 });
+    }
+    storyIdByKey[storyKey(slot.state, slot.phase)] = result.id;
+  }
+
+  // Always create an empty Iterations story under Post Launch epic
+  const postLaunchEpicId = epicIdByGroup["post-launch"];
+  if (postLaunchEpicId) {
+    await createIssue({
+      fields: {
+        project: { key: PROJECT_KEY },
+        summary: `[${projectName}] Iterations`,
+        description: buildStoryAdfDescription("Iterations", projectInfo, []),
+        issuetype: { name: "Story" },
+        labels: ["design-process", "iterations"],
+        parent: { id: postLaunchEpicId },
+        ...peopleFields,
+      },
+    }, auth);
+  }
+
+  // Create Sub-tasks under their Story
   const results: { taskId: string; jiraKey: string; jiraUrl: string }[] = [];
   const errors: { taskId: string; error: string }[] = [];
 
   for (const task of tasks) {
-    const storyId = storyIdByState[task.state];
-    const result = await createIssue(
-      {
-        fields: {
-          project: { key: PROJECT_KEY },
-          summary: task.jiraTemplate.summary,
-          description: buildSubTaskAdfDescription(task),
-          issuetype: { name: "Sub-task" },
-          labels: [...task.jiraTemplate.labels, "CI_UX"],
-          components: [{ name: "design" }],
-          ...(storyId ? { parent: { id: storyId } } : {}),
-          ...(assigneeAccountId ? { assignee: { accountId: assigneeAccountId } } : {}),
-          ...(reporterAccountId ? { reporter: { accountId: reporterAccountId } } : {}),
-        },
+    const key = storyKey(task.state, task.phase);
+    const storyId = storyIdByKey[key];
+
+    const result = await createIssue({
+      fields: {
+        project: { key: PROJECT_KEY },
+        summary: `[UX] ${task.jiraTemplate.summary}`,
+        description: buildSubTaskAdfDescription(task),
+        issuetype: { name: "Sub-task" },
+        labels: [...task.jiraTemplate.labels, "CI_UX"],
+        components: [{ name: "design" }],
+        ...(storyId ? { parent: { id: storyId } } : {}),
+        ...peopleFields,
       },
-      auth
-    );
+    }, auth);
 
     if ("error" in result) {
       errors.push({ taskId: task.id, error: result.error });
@@ -419,5 +543,5 @@ export async function POST(request: Request) {
     }
   }
 
-  return NextResponse.json({ stories: storyResults, results, errors });
+  return NextResponse.json({ results, errors });
 }

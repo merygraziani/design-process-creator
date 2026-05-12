@@ -1,14 +1,18 @@
+"use client";
+
 import { notFound } from "next/navigation";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, User, Target, CheckSquare, ListTodo } from "lucide-react";
 import { getTaskById, STATES } from "@/lib/data";
+import { use } from "react";
 
-export default async function TaskDetailPage({
+export default function TaskDetailPage({
   params,
 }: {
   params: Promise<{ taskId: string }>;
 }) {
-  const { taskId } = await params;
+  const { taskId } = use(params);
+  const router = useRouter();
   const task = getTaskById(taskId);
 
   if (!task) notFound();
@@ -18,12 +22,12 @@ export default async function TaskDetailPage({
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-100 px-6 py-4 flex items-center gap-4">
-        <Link
-          href="/process"
+        <button
+          onClick={() => router.back()}
           className="text-gray-400 hover:text-gray-900 transition-colors"
         >
           <ArrowLeft className="w-5 h-5" />
-        </Link>
+        </button>
         <div className="flex items-center gap-3">
           <div>
             <h1 className="text-base font-semibold text-gray-900">

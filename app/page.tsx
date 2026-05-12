@@ -18,7 +18,7 @@ export default function WelcomePage() {
         </p>
 
         <Link
-          href="/questionnaire"
+          href="/d2d-selector"
           className="inline-flex items-center gap-2 bg-gray-900 text-white text-sm font-semibold px-6 py-3 rounded-xl hover:bg-gray-700 transition-colors"
         >
           Start <ArrowRight className="w-4 h-4" />

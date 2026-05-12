@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, ArrowRight } from "lucide-react";
-import { buildProcessConfig } from "@/lib/questionnaire";
+import { buildProcessConfig, D2DType } from "@/lib/questionnaire";
 import clsx from "clsx";
 
 const MARKETS = ["ALL", "DEU", "FRA", "ES", "ITA", "ROE"];
@@ -19,6 +19,9 @@ export type ProjectInfo = {
 
 export default function QuestionnairePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const d2dType = (searchParams.get("d2d") ?? "complex") as D2DType;
+
   const [projectInfo, setProjectInfo] = useState<ProjectInfo>({
     projectName: "",
     problemStatement: "",
@@ -41,7 +44,7 @@ export default function QuestionnairePage() {
 
   function handleGenerate() {
     if (!canProceedFromInfo) return;
-    const config = buildProcessConfig({});
+    const config = buildProcessConfig({}, d2dType);
     const params = new URLSearchParams({
       config: JSON.stringify({
         startingState: config.startingState,
@@ -58,9 +61,21 @@ export default function QuestionnairePage() {
       <main className="min-h-screen bg-white flex flex-col items-center justify-center px-6 py-16">
         <div className="w-full max-w-xl flex flex-col gap-5">
           <div>
-            <p className="text-xs font-medium text-gray-400 uppercase tracking-widest mb-3">
-              Project info
-            </p>
+            <div className="flex flex-col gap-1 mb-3">
+              <p className="text-xs font-medium text-gray-400 uppercase tracking-widest">
+                Step 2 of 2
+              </p>
+              <span
+                className={clsx(
+                  "text-base font-semibold capitalize px-2.5 py-1 rounded-lg w-fit",
+                  d2dType === "simple" && "bg-[#d8edeb] text-[#2d6e68]",
+                  d2dType === "complicated" && "bg-[#e9eef2] text-[#2d4a5e]",
+                  d2dType === "complex" && "bg-[#f2ece1] text-[#6b4e1e]"
+                )}
+              >
+                {d2dType}
+              </span>
+            </div>
             <h2 className="text-2xl font-semibold text-gray-900">
               Tell us about the project
             </h2>
@@ -178,11 +193,11 @@ export default function QuestionnairePage() {
 
           <div className="flex justify-between mt-2">
             <button
-              onClick={() => router.push("/")}
+              onClick={() => router.push("/d2d-selector")}
               className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-900 transition-colors"
             >
               <ArrowLeft className="w-4 h-4" />
-              Home
+              Back
             </button>
             <button
               onClick={handleGenerate}

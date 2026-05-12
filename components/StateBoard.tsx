@@ -30,10 +30,11 @@ export function StateBoard({ config, projectInfo }: Props) {
   const [creating, setCreating] = useState(false);
   const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
-  const [epicLink, setEpicLink] = useState("");
+  const [initiativeLink, setInitiativeLink] = useState("");
   const [editing, setEditing] = useState<EditingTask | null>(null);
   const [adding, setAdding] = useState<{ phase: Phase; state: State } | null>(null);
   const [addForm, setAddForm] = useState({ title: "", owner: "" });
+  const [scratchOpen, setScratchOpen] = useState(false);
 
   const includedTasks = tasks.filter((t) => !skippedIds.has(t.id));
 
@@ -106,7 +107,7 @@ export function StateBoard({ config, projectInfo }: Props) {
       const res = await fetch("/api/jira/create-tickets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tasks: includedTasks, projectInfo, epicLink: epicLink.trim() }),
+        body: JSON.stringify({ tasks: includedTasks, projectInfo, initiativeLink: initiativeLink.trim() }),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -140,9 +141,9 @@ export function StateBoard({ config, projectInfo }: Props) {
         <div className="flex items-center gap-3 flex-wrap">
           <input
             type="text"
-            value={epicLink}
-            onChange={(e) => setEpicLink(e.target.value)}
-            placeholder="Epic link"
+            value={initiativeLink}
+            onChange={(e) => setInitiativeLink(e.target.value)}
+            placeholder="Initiative link (optional)"
             disabled={creating || status === "success"}
             className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-400 transition-colors w-64 disabled:opacity-50"
           />
@@ -158,7 +159,7 @@ export function StateBoard({ config, projectInfo }: Props) {
           )}
           <button
             onClick={handleCreateTickets}
-            disabled={creating || status === "success" || !epicLink.trim()}
+            disabled={creating || status === "success"}
             className="px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-gray-900 text-white hover:bg-gray-700 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
           >
             {creating ? (
@@ -196,12 +197,6 @@ export function StateBoard({ config, projectInfo }: Props) {
                   <span className="text-xs font-bold uppercase tracking-widest text-gray-600">
                     {stateInfo.label}
                   </span>
-                  <button
-                    onClick={() => handleSkipState(stateInfo.id)}
-                    className="text-[10px] font-medium uppercase tracking-wide text-gray-400 hover:text-gray-700 transition-colors"
-                  >
-                    {stateAllSkipped ? "Unskip all" : "Skip all"}
-                  </button>
                 </div>
                 <div
                   className="rounded-b-xl rounded-tr-xl p-4 flex gap-4"
@@ -231,6 +226,7 @@ export function StateBoard({ config, projectInfo }: Props) {
                         onAdd={(ph, st) => {
                           setAdding({ phase: ph, state: st });
                           setAddForm({ title: "", owner: "" });
+                          setScratchOpen(false);
                         }}
                         onCreateTickets={phase.id === "measure" ? handleCreateTickets : undefined}
                         jiraStatus={phase.id === "measure" ? status : undefined}
@@ -292,54 +288,94 @@ export function StateBoard({ config, projectInfo }: Props) {
       )}
 
       {/* Add modal */}
-      {adding && (
-        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-gray-900">Add task</h3>
-              <button onClick={() => setAdding(null)} className="text-gray-400 hover:text-gray-700">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="flex flex-col gap-3">
-              <div>
-                <label className="text-xs font-medium text-gray-600 mb-1 block">Title</label>
-                <input
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-400"
-                  placeholder="Task title"
-                  value={addForm.title}
-                  onChange={(e) => setAddForm({ ...addForm, title: e.target.value })}
-                  autoFocus
-                />
+      {adding && (() => {
+        const skippedInPhase = tasks.filter(
+          (t) => t.phase === adding.phase && skippedIds.has(t.id)
+        );
+        return (
+          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4 overflow-y-auto">
+            <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm flex flex-col gap-4 my-auto max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-gray-900">Add task</h3>
+                <button onClick={() => setAdding(null)} className="text-gray-400 hover:text-gray-700">
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-              <div>
-                <label className="text-xs font-medium text-gray-600 mb-1 block">Owner</label>
-                <input
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-400"
-                  placeholder="e.g. Designer"
-                  value={addForm.owner}
-                  onChange={(e) => setAddForm({ ...addForm, owner: e.target.value })}
-                />
+
+              <div className="flex flex-col gap-1.5">
+                {/* Create from scratch — always first, as a dropdown */}
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                  <button
+                    onClick={() => setScratchOpen((o) => !o)}
+                    className="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium text-gray-900 hover:bg-gray-50 transition-colors"
+                  >
+                    Create from scratch
+                    <span className="text-gray-400 text-xs">{scratchOpen ? "▲" : "▼"}</span>
+                  </button>
+                  {scratchOpen && (
+                    <div className="flex flex-col gap-3 px-3 pb-3 pt-1 border-t border-gray-100">
+                      <div>
+                        <label className="text-xs font-medium text-gray-600 mb-1 block">Title</label>
+                        <input
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-400"
+                          placeholder="Task title"
+                          value={addForm.title}
+                          onChange={(e) => setAddForm({ ...addForm, title: e.target.value })}
+                          autoFocus
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-gray-600 mb-1 block">Owner</label>
+                        <input
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-400"
+                          placeholder="e.g. Designer"
+                          value={addForm.owner}
+                          onChange={(e) => setAddForm({ ...addForm, owner: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Skipped tasks */}
+                {skippedInPhase.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => {
+                      setSkippedIds((prev) => {
+                        const next = new Set(prev);
+                        next.delete(t.id);
+                        return next;
+                      });
+                      setAdding(null);
+                    }}
+                    className="text-left px-3 py-2.5 rounded-lg border border-gray-200 hover:border-gray-400 transition-all"
+                  >
+                    <p className="text-sm font-medium text-gray-900">{t.title}</p>
+                    <p className="text-xs text-gray-500">{t.owner}</p>
+                  </button>
+                ))}
               </div>
-            </div>
-            <div className="flex justify-end gap-2 pt-1">
-              <button
-                onClick={() => setAdding(null)}
-                className="px-4 py-2 text-sm text-gray-500 hover:text-gray-900"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleAddSave}
-                disabled={!addForm.title.trim()}
-                className="px-4 py-2 text-sm font-medium bg-gray-900 text-white rounded-lg hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                Add
-              </button>
+
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  onClick={() => setAdding(null)}
+                  className="px-4 py-2 text-sm text-gray-500 hover:text-gray-900"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddSave}
+                  disabled={!addForm.title.trim()}
+                  className="px-4 py-2 text-sm font-medium bg-gray-900 text-white rounded-lg hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Add
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
