@@ -3,7 +3,7 @@
 import { useState } from "react";
 import clsx from "clsx";
 import { Loader2, CheckCircle, AlertCircle, X } from "lucide-react";
-import { TASKS, STATES, PHASES, ProcessConfig, Task, Phase, State } from "@/lib/data";
+import { TASKS, EPIC_GROUPS, PHASES, ProcessConfig, Task, Phase, State } from "@/lib/data";
 import { PhaseColumn } from "./PhaseColumn";
 import type { ProjectInfo } from "@/app/questionnaire/page";
 
@@ -178,31 +178,27 @@ export function StateBoard({ config, projectInfo }: Props) {
       {/* Board */}
       <div className="overflow-x-auto pb-4">
         <div className="flex gap-6 min-w-max">
-          {STATES.map((stateInfo) => {
-            const phasesInState = PHASES.filter(
-              (p) => p.state === stateInfo.id
+          {EPIC_GROUPS.map((epicGroup) => {
+            const phasesInGroup = PHASES.filter((p) =>
+              epicGroup.phases.includes(p.id)
             );
-            const allTasksInState = tasks.filter(
-              (t) => t.state === stateInfo.id
-            );
-            if (allTasksInState.length === 0) return null;
-            const stateAllSkipped = allTasksInState.every((t) => skippedIds.has(t.id));
-
             return (
-              <div key={stateInfo.id} className="flex flex-col gap-2">
+              <div key={epicGroup.id} className="flex flex-col gap-2">
+                {/* Epic header */}
                 <div
                   className="rounded-t-xl px-4 py-2 flex items-center justify-between"
-                  style={{ background: stateInfo.color }}
+                  style={{ background: epicGroup.color }}
                 >
                   <span className="text-xs font-bold uppercase tracking-widest text-gray-600">
-                    {stateInfo.label}
+                    {epicGroup.label}
                   </span>
                 </div>
+                {/* Phase columns */}
                 <div
                   className="rounded-b-xl rounded-tr-xl p-4 flex gap-4"
-                  style={{ background: stateInfo.color + "80" }}
+                  style={{ background: epicGroup.color + "80" }}
                 >
-                  {phasesInState.map((phase) => {
+                  {phasesInGroup.map((phase) => {
                     const phaseTasks = tasks.filter((t) => t.phase === phase.id);
                     return (
                       <PhaseColumn

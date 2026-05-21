@@ -18,6 +18,12 @@ const EPIC_LABELS: Record<EpicGroup, string> = {
   "post-launch": "Post Launch",
 };
 
+const EPIC_ISSUE_TYPE: Record<EpicGroup, string> = {
+  "discovery": "Discovery",
+  "delivery": "Epic",
+  "post-launch": "Epic",
+};
+
 // Map each state to the Epic it belongs to
 const STATE_TO_EPIC: Record<State, EpicGroup> = {
   "problem-opportunity": "discovery",
@@ -37,6 +43,7 @@ const STATE_STORY_LABEL: Record<State, string> = {
 const PHASE_STORY_LABEL: Record<string, string> = {
   "build": "Build",
   "measure": "Measure",
+  "iterations": "Iterations",
 };
 
 type ProjectInfo = {
@@ -396,7 +403,7 @@ export async function POST(request: Request) {
         project: { key: PROJECT_KEY },
         summary: `[${projectName}] ${epicLabel}`,
         description: buildEpicAdfDescription(epicLabel, projectInfo),
-        issuetype: { name: "Epic" },
+        issuetype: { name: EPIC_ISSUE_TYPE[epicGroup] },
         labels: ["design-process", epicGroup],
         ...(initiativeId ? { parent: { id: initiativeId } } : {}),
         ...peopleFields,
@@ -431,7 +438,7 @@ export async function POST(request: Request) {
 
     if (task.state === "implementation") {
       label = PHASE_STORY_LABEL[task.phase] ?? "Build";
-      epicGroup = task.phase === "measure" ? "post-launch" : "delivery";
+      epicGroup = (task.phase === "measure" || task.phase === "iterations") ? "post-launch" : "delivery";
       slotPhase = task.phase;
     } else {
       label = STATE_STORY_LABEL[task.state];
@@ -455,7 +462,7 @@ export async function POST(request: Request) {
           project: { key: PROJECT_KEY },
           summary: `[${projectName}] ${epicLabel}`,
           description: buildEpicAdfDescription(epicLabel, projectInfo),
-          issuetype: { name: "Epic" },
+          issuetype: { name: EPIC_ISSUE_TYPE[slot.epicGroup] },
           labels: ["design-process", slot.epicGroup],
           ...(initiativeId ? { parent: { id: initiativeId } } : {}),
           ...peopleFields,
@@ -493,6 +500,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `Failed to create story "${slot.label}": ${result.error}` }, { status: 500 });
     }
     storyIdByKey[storyKey(slot.state, slot.phase)] = result.id;
+  }
+
+  // Always create the Post Launch epic if it wasn't already created by a measure task
+  if (!epicIdByGroup["post-launch"]) {
+    const epicLabel = EPIC_LABELS["post-launch"];
+    const result = await createIssue({
+      fields: {
+        project: { key: PROJECT_KEY },
+        summary: `[${projectName}] ${epicLabel}`,
+        description: buildEpicAdfDescription(epicLabel, projectInfo),
+        issuetype: { name: EPIC_ISSUE_TYPE["post-launch"] },
+        labels: ["design-process", "post-launch"],
+        ...(initiativeId ? { parent: { id: initiativeId } } : {}),
+        ...peopleFields,
+      },
+    }, auth);
+
+    if ("error" in result) {
+      return NextResponse.json({ error: `Failed to create epic "${epicLabel}": ${result.error}` }, { status: 500 });
+    }
+    epicIdByGroup["post-launch"] = result.id;
   }
 
   // Always create an empty Iterations story under Post Launch epic

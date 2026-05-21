@@ -1,10 +1,23 @@
 export type State = "problem-opportunity" | "solution" | "implementation";
 export type Phase =
   | "discovery"
-  | "ideation"
-  | "validation"
+  | "solution"
   | "build"
-  | "measure";
+  | "measure"
+  | "iterations";
+
+export type EpicGroupId = "discovery" | "delivery" | "post-launch";
+
+export const EPIC_GROUPS: {
+  id: EpicGroupId;
+  label: string;
+  color: string;
+  phases: Phase[];
+}[] = [
+  { id: "discovery",   label: "Discovery",   color: "#f2ece1", phases: ["discovery", "solution"] },
+  { id: "delivery",    label: "Delivery",    color: "#e9eef2", phases: ["build"] },
+  { id: "post-launch", label: "Post Launch", color: "#d8edeb", phases: ["measure", "iterations"] },
+];
 
 export type Task = {
   id: string;
@@ -328,15 +341,15 @@ export const TASKS: Task[] = [
     },
   },
 
-  // ─── Solution State → Ideation Phase ─────────────────────────────────────
+  // ─── Solution State → Solution Phase ─────────────────────────────────────
   {
     id: "solution-wireframes",
     title: "Solution Wireframes",
-    phase: "ideation",
+    phase: "solution",
     state: "solution",
     what: "Generate and explore multiple solution concepts through low/mid-fidelity wireframes.",
     owner: "Designer",
-    outcome: "Wireframe concepts ready for team review and validation.",
+    outcome: "Wireframe concepts ready for team review.",
     acceptanceCriteria: [
       "Minimum 2 solution concepts explored",
       "Wireframes cover all key flows",
@@ -350,42 +363,16 @@ export const TASKS: Task[] = [
       "Share with PM for direction sign-off",
     ],
     optional: false,
-    parallelWith: ["translation-request"],
     jiraTemplate: {
       summary: "Solution Wireframes",
-      description: `## What\nGenerate and explore multiple solution concepts through low/mid-fidelity wireframes.\n\n## Owner\nDesigner\n\n## Outcome\nWireframe concepts ready for team review and validation.\n\n## Acceptance Criteria\n- Minimum 2 solution concepts explored\n- Wireframes cover all key flows\n- Design critique conducted\n- Preferred direction selected\n\n## Sub-tasks\n- Ideation workshop / sketching\n- Create wireframes in Figma\n- Internal design review\n- Share with PM for direction sign-off`,
-      labels: ["design-process", "solution", "ideation"],
+      description: `## What\nGenerate and explore multiple solution concepts through low/mid-fidelity wireframes.\n\n## Owner\nDesigner\n\n## Outcome\nWireframe concepts ready for team review.\n\n## Acceptance Criteria\n- Minimum 2 solution concepts explored\n- Wireframes cover all key flows\n- Design critique conducted\n- Preferred direction selected\n\n## Sub-tasks\n- Ideation workshop / sketching\n- Create wireframes in Figma\n- Internal design review\n- Share with PM for direction sign-off`,
+      labels: ["design-process", "solution"],
     },
   },
-
-  // ─── Solution State → Validation (Ideation side) ─────────────────────────
-  {
-    id: "translation-request",
-    title: "Translation Request",
-    phase: "validation",
-    state: "solution",
-    what: "Submit copy and UX writing for localisation/translation review early in the design process.",
-    owner: "Designer + Content Designer",
-    outcome: "Translation pipeline initiated before final designs.",
-    acceptanceCriteria: [
-      "All string keys identified",
-      "Translation brief submitted",
-      "Sign-off from content designer",
-    ],
-    optional: false,
-    parallelWith: ["solution-wireframes"],
-    jiraTemplate: {
-      summary: "Translation Request",
-      description: `## What\nSubmit copy and UX writing for localisation/translation review early in the design process.\n\n## Owner\nDesigner + Content Designer\n\n## Outcome\nTranslation pipeline initiated before final designs.\n\n## Acceptance Criteria\n- All string keys identified\n- Translation brief submitted\n- Sign-off from content designer`,
-      labels: ["design-process", "solution", "validation"],
-    },
-  },
-
-  // ─── Solution State → Validation (High-Fi side) ──────────────────────────
   {
     id: "high-fidelity-ui",
     title: "High-Fidelity UI",
-    phase: "validation",
+    phase: "solution",
     state: "solution",
     what: "Create pixel-perfect, component-compliant high-fidelity designs ready for engineering.",
     owner: "Designer",
@@ -406,13 +393,13 @@ export const TASKS: Task[] = [
     jiraTemplate: {
       summary: "High-Fidelity UI",
       description: `## What\nCreate pixel-perfect, component-compliant high-fidelity designs ready for engineering.\n\n## Owner\nDesigner\n\n## Outcome\nDev-ready Figma file with all states, variants, and handoff annotations.\n\n## Acceptance Criteria\n- All user flows covered in high-fi\n- Design system components used correctly\n- Accessibility checked (contrast, touch targets)\n- Engineering handoff complete\n\n## Sub-tasks\n- Apply design system components\n- Design all states (empty, error, loading, success)\n- Accessibility review\n- Figma handoff / Dev Mode annotations`,
-      labels: ["design-process", "solution", "validation"],
+      labels: ["design-process", "solution"],
     },
   },
   {
     id: "implementation-phases-scope",
     title: "Implementation Phases Scope-down",
-    phase: "validation",
+    phase: "solution",
     state: "solution",
     what: "Break down the solution into phased implementation milestones (MVP, Phase 1, Phase 2…).",
     owner: "Designer + PM + Engineering",
@@ -426,7 +413,7 @@ export const TASKS: Task[] = [
     jiraTemplate: {
       summary: "Implementation Phases Scope-down",
       description: `## What\nBreak down the solution into phased implementation milestones (MVP, Phase 1, Phase 2…).\n\n## Owner\nDesigner + PM + Engineering\n\n## Outcome\nAgreed phased rollout plan with scope per phase.\n\n## Acceptance Criteria\n- MVP scope defined and agreed\n- Future phases documented\n- Engineering complexity accounted for`,
-      labels: ["design-process", "solution", "validation"],
+      labels: ["design-process", "solution"],
     },
   },
 
@@ -479,6 +466,53 @@ export const TASKS: Task[] = [
       labels: ["design-process", "implementation", "build"],
     },
   },
+  {
+    id: "translation-request",
+    title: "Translation Request",
+    phase: "build",
+    state: "implementation",
+    what: "Submit copy and UX writing for localisation/translation review before launch.",
+    owner: "Designer + Content Designer",
+    outcome: "Translation pipeline initiated and completed before launch.",
+    acceptanceCriteria: [
+      "All string keys identified",
+      "Translation brief submitted",
+      "Sign-off from content designer",
+    ],
+    optional: false,
+    jiraTemplate: {
+      summary: "Translation Request",
+      description: `## What\nSubmit copy and UX writing for localisation/translation review before launch.\n\n## Owner\nDesigner + Content Designer\n\n## Outcome\nTranslation pipeline initiated and completed before launch.\n\n## Acceptance Criteria\n- All string keys identified\n- Translation brief submitted\n- Sign-off from content designer`,
+      labels: ["design-process", "implementation", "build"],
+    },
+  },
+  {
+    id: "pre-launch-usability",
+    title: "Pre-launch Usability F&F or Internal Testing",
+    phase: "build",
+    state: "implementation",
+    what: "Run usability testing with friends & family or internal users before the public launch to catch critical issues.",
+    owner: "Designer",
+    outcome: "Validated experience with critical issues resolved before launch.",
+    acceptanceCriteria: [
+      "Test participants recruited (F&F or internal)",
+      "Test sessions conducted",
+      "Critical issues identified and addressed",
+      "Sign-off documented",
+    ],
+    subTasks: [
+      "Define test scope and tasks",
+      "Recruit participants",
+      "Run sessions",
+      "Triage and address critical findings",
+    ],
+    optional: false,
+    jiraTemplate: {
+      summary: "Pre-launch Usability F&F or Internal Testing",
+      description: `## What\nRun usability testing with friends & family or internal users before the public launch to catch critical issues.\n\n## Owner\nDesigner\n\n## Outcome\nValidated experience with critical issues resolved before launch.\n\n## Acceptance Criteria\n- Test participants recruited (F&F or internal)\n- Test sessions conducted\n- Critical issues identified and addressed\n- Sign-off documented\n\n## Sub-tasks\n- Define test scope and tasks\n- Recruit participants\n- Run sessions\n- Triage and address critical findings`,
+      labels: ["design-process", "implementation", "build"],
+    },
+  },
 
   // ─── Implementation State → Measure Phase ─────────────────────────────────
   {
@@ -495,6 +529,7 @@ export const TASKS: Task[] = [
       "Weekly review cadence established",
     ],
     optional: false,
+    parallelWith: ["continuous-discovery"],
     jiraTemplate: {
       summary: "Data Tracking / Monitoring",
       description: `## What\nMonitor post-launch analytics to verify feature performance against success metrics.\n\n## Owner\nDesigner + PM + Data\n\n## Outcome\nDashboard or report tracking feature KPIs over the first 4–8 weeks post-launch.\n\n## Acceptance Criteria\n- Monitoring dashboard set up\n- Baseline metrics documented\n- Weekly review cadence established`,
@@ -502,55 +537,40 @@ export const TASKS: Task[] = [
     },
   },
   {
-    id: "monitor-app-reviews",
-    title: "Monitor App Reviews / CS Contacts",
+    id: "continuous-discovery",
+    title: "Continuous Discovery",
     phase: "measure",
     state: "implementation",
-    what: "Track App Store reviews and CS contact topics related to the launched feature.",
+    what: "Ongoing post-launch monitoring of user sentiment and behaviour through app reviews, CS contacts, and shadowing sessions.",
     owner: "Designer + CS",
-    outcome: "Qualitative signal on user sentiment post-launch.",
+    outcome: "Qualitative and behavioural signals feeding into the next iteration backlog.",
     acceptanceCriteria: [
       "App Store filter set up for feature-related reviews",
       "CS contact categories monitored",
+      "Shadowing sessions conducted",
       "Issues fed back into backlog",
     ],
-    optional: false,
-    parallelWith: ["data-tracking-monitoring", "user-shadowing"],
-    jiraTemplate: {
-      summary: "Monitor App Reviews / CS Contacts",
-      description: `## What\nTrack App Store reviews and CS contact topics related to the launched feature.\n\n## Owner\nDesigner + CS\n\n## Outcome\nQualitative signal on user sentiment post-launch.\n\n## Acceptance Criteria\n- App Store filter set up for feature-related reviews\n- CS contact categories monitored\n- Issues fed back into backlog`,
-      labels: ["design-process", "implementation", "measure"],
-    },
-  },
-  {
-    id: "user-shadowing",
-    title: "User Shadowing",
-    phase: "measure",
-    state: "implementation",
-    what: "Observe real users (F&F or external) using the launched feature in naturalistic settings.",
-    owner: "Designer",
-    outcome: "Observational insights to inform next iteration.",
-    acceptanceCriteria: [
-      "Minimum 3 shadowing sessions conducted",
-      "Key observations documented",
-      "Insights shared with team",
+    subTasks: [
+      "Monitor app reviews",
+      "CS contacts",
+      "User shadowing sessions",
     ],
     optional: false,
-    parallelWith: ["data-tracking-monitoring", "monitor-app-reviews"],
+    parallelWith: ["data-tracking-monitoring"],
     jiraTemplate: {
-      summary: "User Shadowing (F&F or external users)",
-      description: `## What\nObserve real users using the launched feature in naturalistic settings.\n\n## Owner\nDesigner\n\n## Outcome\nObservational insights to inform next iteration.\n\n## Acceptance Criteria\n- Minimum 3 shadowing sessions conducted\n- Key observations documented\n- Insights shared with team`,
+      summary: "Continuous Discovery",
+      description: `## What\nOngoing post-launch monitoring of user sentiment and behaviour through app reviews, CS contacts, and shadowing sessions.\n\n## Owner\nDesigner + CS\n\n## Outcome\nQualitative and behavioural signals feeding into the next iteration backlog.\n\n## Acceptance Criteria\n- App Store filter set up for feature-related reviews\n- CS contact categories monitored\n- Shadowing sessions conducted\n- Issues fed back into backlog\n\n## Sub-tasks\n- Monitor app reviews\n- CS contacts\n- User shadowing sessions`,
       labels: ["design-process", "implementation", "measure"],
     },
   },
 ];
 
 export const PHASES: { id: Phase; label: string; state: State }[] = [
-  { id: "discovery", label: "Discovery", state: "problem-opportunity" },
-  { id: "ideation", label: "Ideation", state: "solution" },
-  { id: "validation", label: "Validation", state: "solution" },
-  { id: "build", label: "Build", state: "implementation" },
-  { id: "measure", label: "Measure", state: "implementation" },
+  { id: "discovery",  label: "Problem & Opportunity", state: "problem-opportunity" },
+  { id: "solution",   label: "Solution",              state: "solution" },
+  { id: "build",      label: "Build",                 state: "implementation" },
+  { id: "measure",    label: "Measure",               state: "implementation" },
+  { id: "iterations", label: "Iterations",            state: "implementation" },
 ];
 
 export const STATES: { id: State; label: string; color: string }[] = [
