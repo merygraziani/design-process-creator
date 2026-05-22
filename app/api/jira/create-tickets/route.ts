@@ -59,6 +59,7 @@ type CreateTicketsBody = {
   tasks: Task[];
   projectInfo: ProjectInfo;
   initiativeLink?: string;
+  teamName?: string;
 };
 
 function parseIssueKey(input: string): string | null {
@@ -88,6 +89,35 @@ async function lookupAccountId(email: string, auth: string): Promise<string | nu
   return (exact ?? data[0]).accountId ?? null;
 }
 
+async function lookupTeamId(teamName: string, auth: string): Promise<string | null> {
+  const res = await fetch(
+    `https://api.atlassian.com/ex/jira/${CLOUD_ID}/rest/teams/1.0/teams/find?query=${encodeURIComponent(teamName)}`,
+    { headers: { Authorization: `Basic ${auth}`, Accept: "application/json" } }
+  );
+  if (!res.ok) return null;
+  const data = await res.json();
+  const teams: { id: string; displayName: string }[] = data?.teams ?? data?.results ?? [];
+  if (teams.length === 0) return null;
+  const exact = teams.find((t) => t.displayName?.toLowerCase() === teamName.toLowerCase());
+  return (exact ?? teams[0]).id ?? null;
+}
+
+async function linkIssues(inwardId: string, outwardId: string, auth: string): Promise<void> {
+  await fetch(`${BASE_URL}/issueLink`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${auth}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({
+      type: { name: "Relates" },
+      inwardIssue: { id: inwardId },
+      outwardIssue: { id: outwardId },
+    }),
+  });
+}
+
 async function createIssue(
   payload: object,
   auth: string
@@ -115,31 +145,8 @@ function makeId() {
   return Math.random().toString(36).substring(2, 18);
 }
 
-function buildEpicAdfDescription(epicLabel: string, projectInfo: ProjectInfo): object {
-  const content: object[] = [
-    {
-      type: "panel",
-      attrs: { panelType: "info" },
-      content: [
-        { type: "paragraph", content: [{ type: "text", text: epicLabel, marks: [{ type: "strong" }] }] },
-        ...(projectInfo.markets?.length ? [{
-          type: "paragraph",
-          content: [
-            { type: "text", text: "Market: ", marks: [{ type: "strong" }] },
-            { type: "text", text: projectInfo.markets.join(", ") },
-          ],
-        }] : []),
-        ...(projectInfo.targetedUsers ? [{
-          type: "paragraph",
-          content: [
-            { type: "text", text: "Targeted users: ", marks: [{ type: "strong" }] },
-            { type: "text", text: projectInfo.targetedUsers },
-          ],
-        }] : []),
-      ],
-    },
-  ];
-  return { version: 1, type: "doc", content };
+function buildEpicAdfDescription(): object {
+  return { version: 1, type: "doc", content: [] };
 }
 
 // Rich "What we do" content per story type, based on the N26 process framework image
@@ -183,45 +190,13 @@ function adfBulletList(items: string[]): object {
   };
 }
 
-function buildStoryAdfDescription(storyLabel: string, projectInfo: ProjectInfo, tasks: Task[]): object {
-  const taskListItems = tasks.map((t) => ({
-    type: "listItem",
-    content: [{
-      type: "paragraph",
-      content: [
-        { type: "text", text: t.title, marks: [{ type: "strong" }] },
-        ...(t.what ? [{ type: "text", text: ` — ${t.what}` }] : []),
-      ],
-    }],
-  }));
-
+function buildStoryAdfDescription(storyLabel: string, _projectInfo: ProjectInfo, _tasks: Task[]): object {
   const whatWeDo = STORY_WHAT_WE_DO[storyLabel] ?? [];
 
   return {
     version: 1,
     type: "doc",
     content: [
-      {
-        type: "panel",
-        attrs: { panelType: "info" },
-        content: [
-          { type: "paragraph", content: [{ type: "text", text: storyLabel, marks: [{ type: "strong" }] }] },
-          ...(projectInfo.markets?.length ? [{
-            type: "paragraph",
-            content: [
-              { type: "text", text: "Market: ", marks: [{ type: "strong" }] },
-              { type: "text", text: projectInfo.markets.join(", ") },
-            ],
-          }] : []),
-          ...(projectInfo.targetedUsers ? [{
-            type: "paragraph",
-            content: [
-              { type: "text", text: "Targeted users: ", marks: [{ type: "strong" }] },
-              { type: "text", text: projectInfo.targetedUsers },
-            ],
-          }] : []),
-        ],
-      },
       ...(whatWeDo.length > 0 ? [{
         type: "panel",
         attrs: { panelType: "note" },
@@ -230,14 +205,6 @@ function buildStoryAdfDescription(storyLabel: string, projectInfo: ProjectInfo, 
           adfBulletList(whatWeDo),
         ],
       }] : []),
-      {
-        type: "panel",
-        attrs: { panelType: "success" },
-        content: [
-          { type: "paragraph", content: [{ type: "text", text: "Tasks in this story:", marks: [{ type: "strong" }] }] },
-          { type: "bulletList", content: taskListItems },
-        ],
-      },
     ],
   };
 }
@@ -299,26 +266,7 @@ function buildSubTaskAdfDescription(task: Task): object {
       ]},
       { type: "panel", attrs: { panelType: "warning" }, content: [
         { type: "paragraph", content: [{ type: "text", text: "Tools", marks: [{ type: "strong" }] }] },
-        { type: "paragraph", content: [{ type: "text", text: "Eg. For this task you can use the following tools:" }] },
-        {
-          type: "bulletList",
-          content: [
-            {
-              type: "listItem",
-              content: [{ type: "paragraph", content: [
-                { type: "text", text: "Mobbin (" },
-                { type: "text", text: "https://mobbin.com/discover/apps/ios/latest", marks: [{ type: "link", attrs: { href: "https://mobbin.com/discover/apps/ios/latest" } }] },
-                { type: "text", text: "): Ask @Ilgavrs for a N26 Team seat to have full access" },
-              ]}],
-            },
-            {
-              type: "listItem",
-              content: [{ type: "paragraph", content: [
-                { type: "text", text: "Benchmark skill" },
-              ]}],
-            },
-          ],
-        },
+        { type: "paragraph", content: [{ type: "text", text: "There are no designated skills or tools for this task. If you have one, please contact " }, { type: "text", text: "maria.graziani@n26.com", marks: [{ type: "link", attrs: { href: "mailto:maria.graziani@n26.com" } }] }] },
       ]},
     ],
   };
@@ -342,7 +290,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { tasks, projectInfo, initiativeLink } = body;
+  const { tasks, projectInfo, initiativeLink, teamName } = body;
   const projectName = projectInfo?.projectName ?? "Design Project";
 
   if (!Array.isArray(tasks) || tasks.length === 0) {
@@ -351,8 +299,9 @@ export async function POST(request: Request) {
 
   const auth = Buffer.from(`${email}:${apiToken}`).toString("base64");
 
-  // Resolve initiative ID (optional)
+  // Resolve initiative ID — use existing if link provided, otherwise create one
   let initiativeId: string | null = null;
+  let teamId: string | null = null;
   if (initiativeLink?.trim()) {
     const initiativeKey = parseIssueKey(initiativeLink.trim());
     if (!initiativeKey) {
@@ -362,6 +311,46 @@ export async function POST(request: Request) {
     if (!initiativeId) {
       return NextResponse.json({ error: `Could not find initiative ${initiativeKey} in Jira` }, { status: 400 });
     }
+  } else {
+    // No initiative link — create one. Team is required.
+    if (!teamName?.trim()) {
+      return NextResponse.json({ error: "Team is required when no initiative link is provided" }, { status: 400 });
+    }
+    teamId = await lookupTeamId(teamName.trim(), auth);
+    if (!teamId) {
+      return NextResponse.json({ error: `Could not find a team matching "${teamName}"` }, { status: 400 });
+    }
+    const initiative = await createIssue({
+      fields: {
+        project: { key: PROJECT_KEY },
+        summary: projectName,
+        issuetype: { name: "Initiative" },
+        customfield_11900: { id: teamId },
+      },
+    }, auth);
+    if ("error" in initiative) {
+      return NextResponse.json({ error: `Failed to create initiative: ${initiative.error}` }, { status: 500 });
+    }
+    initiativeId = initiative.id;
+  }
+
+  // Always create a separate Post Launch initiative
+  const postLaunchInitiative = await createIssue({
+    fields: {
+      project: { key: PROJECT_KEY },
+      summary: `${projectName} Post Launch`,
+      issuetype: { name: "Initiative" },
+      ...(teamId ? { customfield_11900: { id: teamId } } : {}),
+    },
+  }, auth);
+  if ("error" in postLaunchInitiative) {
+    return NextResponse.json({ error: `Failed to create Post Launch initiative: ${postLaunchInitiative.error}` }, { status: 500 });
+  }
+  const postLaunchInitiativeId = postLaunchInitiative.id;
+
+  // Link the two initiatives so they're easy to navigate between
+  if (initiativeId) {
+    await linkIssues(initiativeId, postLaunchInitiativeId, auth);
   }
 
   // Resolve people
@@ -398,14 +387,15 @@ export async function POST(request: Request) {
 
   for (const epicGroup of epicGroupsNeeded) {
     const epicLabel = EPIC_LABELS[epicGroup];
+    const parentInitiativeId = epicGroup === "post-launch" ? postLaunchInitiativeId : initiativeId;
     const result = await createIssue({
       fields: {
         project: { key: PROJECT_KEY },
         summary: `[${projectName}] ${epicLabel}`,
-        description: buildEpicAdfDescription(epicLabel, projectInfo),
+        description: buildEpicAdfDescription(),
         issuetype: { name: EPIC_ISSUE_TYPE[epicGroup] },
-        labels: ["design-process", epicGroup],
-        ...(initiativeId ? { parent: { id: initiativeId } } : {}),
+        labels: [],
+        ...(parentInitiativeId ? { parent: { id: parentInitiativeId } } : {}),
         ...peopleFields,
       },
     }, auth);
@@ -457,14 +447,15 @@ export async function POST(request: Request) {
   for (const slot of storySlots) {
     if (!epicIdByGroup[slot.epicGroup]) {
       const epicLabel = EPIC_LABELS[slot.epicGroup];
+      const parentInitiativeId = slot.epicGroup === "post-launch" ? postLaunchInitiativeId : initiativeId;
       const result = await createIssue({
         fields: {
           project: { key: PROJECT_KEY },
           summary: `[${projectName}] ${epicLabel}`,
-          description: buildEpicAdfDescription(epicLabel, projectInfo),
+          description: buildEpicAdfDescription(),
           issuetype: { name: EPIC_ISSUE_TYPE[slot.epicGroup] },
-          labels: ["design-process", slot.epicGroup],
-          ...(initiativeId ? { parent: { id: initiativeId } } : {}),
+          labels: [],
+          ...(parentInitiativeId ? { parent: { id: parentInitiativeId } } : {}),
           ...peopleFields,
         },
       }, auth);
@@ -490,7 +481,7 @@ export async function POST(request: Request) {
         summary: `[${projectName}] ${slot.label}`,
         description: buildStoryAdfDescription(slot.label, projectInfo, tasksInSlot),
         issuetype: { name: "Story" },
-        labels: ["design-process", slot.state],
+        labels: [],
         ...(epicId ? { parent: { id: epicId } } : {}),
         ...peopleFields,
       },
@@ -509,10 +500,10 @@ export async function POST(request: Request) {
       fields: {
         project: { key: PROJECT_KEY },
         summary: `[${projectName}] ${epicLabel}`,
-        description: buildEpicAdfDescription(epicLabel, projectInfo),
+        description: buildEpicAdfDescription(),
         issuetype: { name: EPIC_ISSUE_TYPE["post-launch"] },
-        labels: ["design-process", "post-launch"],
-        ...(initiativeId ? { parent: { id: initiativeId } } : {}),
+        labels: [],
+        parent: { id: postLaunchInitiativeId },
         ...peopleFields,
       },
     }, auth);
@@ -532,7 +523,7 @@ export async function POST(request: Request) {
         summary: `[${projectName}] Iterations`,
         description: buildStoryAdfDescription("Iterations", projectInfo, []),
         issuetype: { name: "Story" },
-        labels: ["design-process", "iterations"],
+        labels: [],
         parent: { id: postLaunchEpicId },
         ...peopleFields,
       },
@@ -553,7 +544,7 @@ export async function POST(request: Request) {
         summary: `[UX] ${task.jiraTemplate.summary}`,
         description: buildSubTaskAdfDescription(task),
         issuetype: { name: "Sub-task" },
-        labels: [...task.jiraTemplate.labels, "CI_UX"],
+        labels: ["CI_UX"],
         components: [{ name: "design" }],
         ...(storyId ? { parent: { id: storyId } } : {}),
         ...peopleFields,

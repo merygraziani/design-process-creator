@@ -31,6 +31,8 @@ export function StateBoard({ config, projectInfo }: Props) {
   const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const [initiativeLink, setInitiativeLink] = useState("");
+  const [showTeamModal, setShowTeamModal] = useState(false);
+  const [pendingTeamName, setPendingTeamName] = useState("");
   const [editing, setEditing] = useState<EditingTask | null>(null);
   const [adding, setAdding] = useState<{ phase: Phase; state: State } | null>(null);
   const [addForm, setAddForm] = useState({ title: "", owner: "" });
@@ -100,14 +102,14 @@ export function StateBoard({ config, projectInfo }: Props) {
     setAddForm({ title: "", owner: "" });
   }
 
-  async function handleCreateTickets() {
+  async function submitTickets(teamNameToUse: string) {
     setCreating(true);
     setStatus("idle");
     try {
       const res = await fetch("/api/jira/create-tickets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tasks: includedTasks, projectInfo, initiativeLink: initiativeLink.trim() }),
+        body: JSON.stringify({ tasks: includedTasks, projectInfo, initiativeLink: initiativeLink.trim(), teamName: teamNameToUse.trim() }),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -124,6 +126,20 @@ export function StateBoard({ config, projectInfo }: Props) {
     } finally {
       setCreating(false);
     }
+  }
+
+  function handleCreateTickets() {
+    if (!initiativeLink.trim()) {
+      setPendingTeamName("");
+      setShowTeamModal(true);
+      return;
+    }
+    submitTickets("");
+  }
+
+  function handleTeamConfirm() {
+    setShowTeamModal(false);
+    submitTickets(pendingTeamName);
   }
 
   return (
@@ -236,6 +252,47 @@ export function StateBoard({ config, projectInfo }: Props) {
           })}
         </div>
       </div>
+
+      {/* Team modal — shown when creating tickets without an initiative link */}
+      {showTeamModal && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-gray-900">Team required</h3>
+              <button onClick={() => setShowTeamModal(false)} className="text-gray-400 hover:text-gray-700">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-sm text-gray-500">
+              No initiative link was provided. A new initiative will be created — enter the team it belongs to.
+            </p>
+            <input
+              type="text"
+              value={pendingTeamName}
+              onChange={(e) => setPendingTeamName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && pendingTeamName.trim() && handleTeamConfirm()}
+              placeholder="e.g. Customer Identity"
+              autoFocus
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-400"
+            />
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                onClick={() => setShowTeamModal(false)}
+                className="px-4 py-2 text-sm text-gray-500 hover:text-gray-900"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleTeamConfirm}
+                disabled={!pendingTeamName.trim()}
+                className="px-4 py-2 text-sm font-medium bg-gray-900 text-white rounded-lg hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Proceed
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Edit modal */}
       {editing && (
