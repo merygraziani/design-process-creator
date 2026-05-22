@@ -59,7 +59,6 @@ type CreateTicketsBody = {
   tasks: Task[];
   projectInfo: ProjectInfo;
   initiativeLink?: string;
-  teamName?: string;
 };
 
 function parseIssueKey(input: string): string | null {
@@ -89,18 +88,6 @@ async function lookupAccountId(email: string, auth: string): Promise<string | nu
   return (exact ?? data[0]).accountId ?? null;
 }
 
-async function lookupTeamId(teamName: string, auth: string): Promise<string | null> {
-  const res = await fetch(
-    `https://api.atlassian.com/ex/jira/${CLOUD_ID}/rest/teams/1.0/teams/find?query=${encodeURIComponent(teamName)}`,
-    { headers: { Authorization: `Basic ${auth}`, Accept: "application/json" } }
-  );
-  if (!res.ok) return null;
-  const data = await res.json();
-  const teams: { id: string; displayName: string }[] = data?.teams ?? data?.results ?? [];
-  if (teams.length === 0) return null;
-  const exact = teams.find((t) => t.displayName?.toLowerCase() === teamName.toLowerCase());
-  return (exact ?? teams[0]).id ?? null;
-}
 
 async function linkIssues(inwardId: string, outwardId: string, auth: string): Promise<void> {
   await fetch(`${BASE_URL}/issueLink`, {
@@ -290,48 +277,27 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { tasks, projectInfo, initiativeLink, teamName } = body;
+  const { tasks, projectInfo, initiativeLink } = body;
   const projectName = projectInfo?.projectName ?? "Design Project";
 
   if (!Array.isArray(tasks) || tasks.length === 0) {
     return NextResponse.json({ error: "No tasks provided" }, { status: 400 });
   }
 
+  if (!initiativeLink?.trim()) {
+    return NextResponse.json({ error: "Initiative link is required" }, { status: 400 });
+  }
+
   const auth = Buffer.from(`${email}:${apiToken}`).toString("base64");
 
-  // Resolve initiative ID — use existing if link provided, otherwise create one
-  let initiativeId: string | null = null;
-  let teamId: string | null = null;
-  if (initiativeLink?.trim()) {
-    const initiativeKey = parseIssueKey(initiativeLink.trim());
-    if (!initiativeKey) {
-      return NextResponse.json({ error: "Could not parse an issue key from the initiative link" }, { status: 400 });
-    }
-    initiativeId = await lookupIssueId(initiativeKey, auth);
-    if (!initiativeId) {
-      return NextResponse.json({ error: `Could not find initiative ${initiativeKey} in Jira` }, { status: 400 });
-    }
-  } else {
-    // No initiative link — create one. Team is required.
-    if (!teamName?.trim()) {
-      return NextResponse.json({ error: "Team is required when no initiative link is provided" }, { status: 400 });
-    }
-    teamId = await lookupTeamId(teamName.trim(), auth);
-    if (!teamId) {
-      return NextResponse.json({ error: `Could not find a team matching "${teamName}"` }, { status: 400 });
-    }
-    const initiative = await createIssue({
-      fields: {
-        project: { key: PROJECT_KEY },
-        summary: projectName,
-        issuetype: { name: "Initiative" },
-        customfield_11900: { id: teamId },
-      },
-    }, auth);
-    if ("error" in initiative) {
-      return NextResponse.json({ error: `Failed to create initiative: ${initiative.error}` }, { status: 500 });
-    }
-    initiativeId = initiative.id;
+  // Resolve main initiative
+  const initiativeKey = parseIssueKey(initiativeLink.trim());
+  if (!initiativeKey) {
+    return NextResponse.json({ error: "Could not parse an issue key from the initiative link" }, { status: 400 });
+  }
+  const initiativeId = await lookupIssueId(initiativeKey, auth);
+  if (!initiativeId) {
+    return NextResponse.json({ error: `Could not find initiative ${initiativeKey} in Jira` }, { status: 400 });
   }
 
   // Always create a separate Post Launch initiative
@@ -340,7 +306,6 @@ export async function POST(request: Request) {
       project: { key: PROJECT_KEY },
       summary: `${projectName} Post Launch`,
       issuetype: { name: "Initiative" },
-      ...(teamId ? { customfield_11900: { id: teamId } } : {}),
     },
   }, auth);
   if ("error" in postLaunchInitiative) {
@@ -349,9 +314,7 @@ export async function POST(request: Request) {
   const postLaunchInitiativeId = postLaunchInitiative.id;
 
   // Link the two initiatives so they're easy to navigate between
-  if (initiativeId) {
-    await linkIssues(initiativeId, postLaunchInitiativeId, auth);
-  }
+  await linkIssues(initiativeId, postLaunchInitiativeId, auth);
 
   // Resolve people
   let assigneeAccountId: string | null = null;
