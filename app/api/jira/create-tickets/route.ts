@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import type { Task, State } from "@/lib/data";
 
 const CLOUD_ID = "88ee171b-941c-4f1e-a762-25e49b508245";
-const PROJECT_KEY = "UX";
 const BASE_URL = `https://api.atlassian.com/ex/jira/${CLOUD_ID}/rest/api/3`;
 
 // New hierarchy:
@@ -295,6 +294,7 @@ export async function POST(request: Request) {
   if (!initiativeKey) {
     return NextResponse.json({ error: "Could not parse an issue key from the initiative link" }, { status: 400 });
   }
+  const projectKey = initiativeKey.split("-")[0];
   const initiativeId = await lookupIssueId(initiativeKey, auth);
   if (!initiativeId) {
     return NextResponse.json({ error: `Could not find initiative ${initiativeKey} in Jira` }, { status: 400 });
@@ -303,7 +303,7 @@ export async function POST(request: Request) {
   // Always create a separate Post Launch initiative
   const postLaunchInitiative = await createIssue({
     fields: {
-      project: { key: PROJECT_KEY },
+      project: { key: projectKey },
       summary: `${projectName} Post Launch`,
       issuetype: { name: "Initiative" },
     },
@@ -353,7 +353,7 @@ export async function POST(request: Request) {
     const parentInitiativeId = epicGroup === "post-launch" ? postLaunchInitiativeId : initiativeId;
     const result = await createIssue({
       fields: {
-        project: { key: PROJECT_KEY },
+        project: { key: projectKey },
         summary: `[${projectName}] ${epicLabel}`,
         description: buildEpicAdfDescription(),
         issuetype: { name: EPIC_ISSUE_TYPE[epicGroup] },
@@ -413,7 +413,7 @@ export async function POST(request: Request) {
       const parentInitiativeId = slot.epicGroup === "post-launch" ? postLaunchInitiativeId : initiativeId;
       const result = await createIssue({
         fields: {
-          project: { key: PROJECT_KEY },
+          project: { key: projectKey },
           summary: `[${projectName}] ${epicLabel}`,
           description: buildEpicAdfDescription(),
           issuetype: { name: EPIC_ISSUE_TYPE[slot.epicGroup] },
@@ -440,7 +440,7 @@ export async function POST(request: Request) {
     const epicId = epicIdByGroup[slot.epicGroup];
     const result = await createIssue({
       fields: {
-        project: { key: PROJECT_KEY },
+        project: { key: projectKey },
         summary: `[${projectName}] ${slot.label}`,
         description: buildStoryAdfDescription(slot.label, projectInfo, tasksInSlot),
         issuetype: { name: "Story" },
@@ -461,7 +461,7 @@ export async function POST(request: Request) {
     const epicLabel = EPIC_LABELS["post-launch"];
     const result = await createIssue({
       fields: {
-        project: { key: PROJECT_KEY },
+        project: { key: projectKey },
         summary: `[${projectName}] ${epicLabel}`,
         description: buildEpicAdfDescription(),
         issuetype: { name: EPIC_ISSUE_TYPE["post-launch"] },
@@ -482,7 +482,7 @@ export async function POST(request: Request) {
   if (postLaunchEpicId) {
     await createIssue({
       fields: {
-        project: { key: PROJECT_KEY },
+        project: { key: projectKey },
         summary: `[${projectName}] Iterations`,
         description: buildStoryAdfDescription("Iterations", projectInfo, []),
         issuetype: { name: "Story" },
@@ -503,7 +503,7 @@ export async function POST(request: Request) {
 
     const result = await createIssue({
       fields: {
-        project: { key: PROJECT_KEY },
+        project: { key: projectKey },
         summary: `[UX] ${task.jiraTemplate.summary}`,
         description: buildSubTaskAdfDescription(task),
         issuetype: { name: "Sub-task" },
