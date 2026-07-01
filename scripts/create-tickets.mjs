@@ -365,8 +365,8 @@ const PHASE_STORY_LABEL = {
 
 async function main() {
   const env = loadEnv();
-  const email = env.JIRA_EMAIL || process.env.JIRA_EMAIL;
-  const apiToken = env.JIRA_API_TOKEN || process.env.JIRA_API_TOKEN;
+  const email = process.env.JIRA_EMAIL || env.JIRA_EMAIL;
+  const apiToken = process.env.JIRA_API_TOKEN || env.JIRA_API_TOKEN;
 
   if (!email || !apiToken) {
     throw new Error(
