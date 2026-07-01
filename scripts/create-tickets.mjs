@@ -177,7 +177,7 @@ function buildStoryAdfDescription(storyLabel) {
   };
 }
 
-function buildSubTaskAdfDescription(task) {
+function buildSubTaskAdfDescription(task, contactEmail) {
   const infoContent = [
     ...(task.what
       ? [
@@ -299,22 +299,29 @@ function buildSubTaskAdfDescription(task) {
           },
           {
             type: "paragraph",
-            content: [
-              {
-                type: "text",
-                text: "There are no designated skills or tools for this task. If you have one, please contact ",
-              },
-              {
-                type: "text",
-                text: "maria.graziani@n26.com",
-                marks: [
+            content: contactEmail
+              ? [
                   {
-                    type: "link",
-                    attrs: { href: "mailto:maria.graziani@n26.com" },
+                    type: "text",
+                    text: "There are no designated skills or tools for this task. If you have one, please contact ",
+                  },
+                  {
+                    type: "text",
+                    text: contactEmail,
+                    marks: [
+                      {
+                        type: "link",
+                        attrs: { href: `mailto:${contactEmail}` },
+                      },
+                    ],
+                  },
+                ]
+              : [
+                  {
+                    type: "text",
+                    text: "There are no designated skills or tools for this task.",
                   },
                 ],
-              },
-            ],
           },
         ],
       },
@@ -601,7 +608,7 @@ async function main() {
         fields: {
           project: { key: projectKey },
           summary: `[UX] ${task.jiraTemplate.summary}`,
-          description: buildSubTaskAdfDescription(task),
+          description: buildSubTaskAdfDescription(task, designerEmail || null),
           issuetype: { name: "Sub-task" },
           labels: ["CI_UX"],
           components: [{ name: "design" }],

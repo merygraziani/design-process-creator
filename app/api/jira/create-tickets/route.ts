@@ -195,7 +195,7 @@ function buildStoryAdfDescription(storyLabel: string, _projectInfo: ProjectInfo,
   };
 }
 
-function buildSubTaskAdfDescription(task: Task): object {
+function buildSubTaskAdfDescription(task: Task, contactEmail?: string): object {
   const infoContent: object[] = [
     ...(task.what ? [{
       type: "paragraph",
@@ -252,7 +252,9 @@ function buildSubTaskAdfDescription(task: Task): object {
       ]},
       { type: "panel", attrs: { panelType: "warning" }, content: [
         { type: "paragraph", content: [{ type: "text", text: "Tools", marks: [{ type: "strong" }] }] },
-        { type: "paragraph", content: [{ type: "text", text: "There are no designated skills or tools for this task. If you have one, please contact " }, { type: "text", text: "maria.graziani@n26.com", marks: [{ type: "link", attrs: { href: "mailto:maria.graziani@n26.com" } }] }] },
+        { type: "paragraph", content: contactEmail
+            ? [{ type: "text", text: "There are no designated skills or tools for this task. If you have one, please contact " }, { type: "text", text: contactEmail, marks: [{ type: "link", attrs: { href: `mailto:${contactEmail}` } }] }]
+            : [{ type: "text", text: "There are no designated skills or tools for this task." }] },
       ]},
     ],
   };
@@ -505,7 +507,7 @@ export async function POST(request: Request) {
       fields: {
         project: { key: projectKey },
         summary: `[UX] ${task.jiraTemplate.summary}`,
-        description: buildSubTaskAdfDescription(task),
+        description: buildSubTaskAdfDescription(task, designerEmail || undefined),
         issuetype: { name: "Sub-task" },
         labels: ["CI_UX"],
         components: [{ name: "design" }],
